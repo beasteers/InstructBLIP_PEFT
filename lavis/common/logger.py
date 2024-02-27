@@ -13,6 +13,7 @@ from collections import defaultdict, deque
 import torch
 import torch.distributed as dist
 
+import wandb
 from lavis.common import dist_utils
 
 
@@ -90,6 +91,7 @@ class MetricLogger(object):
                 v = v.item()
             assert isinstance(v, (float, int))
             self.meters[k].update(v)
+        wandb.log(kwargs)
 
     def __getattr__(self, attr):
         if attr in self.meters:

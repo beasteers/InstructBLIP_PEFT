@@ -9,9 +9,12 @@ import argparse
 import os
 import random
 
+import wandb
+
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
+from omegaconf import OmegaConf
 
 import lavis.tasks as tasks
 from lavis.common.config import Config
@@ -70,7 +73,8 @@ def get_runner_class(cfg):
 
     return runner_cls
 
-
+import ipdb
+@ipdb.iex
 def main():
     # allow auto-dl completes on main process without timeout when using NCCL backend.
     # os.environ["NCCL_BLOCKING_WAIT"] = "1"
@@ -78,7 +82,9 @@ def main():
     # set before init_distributed_mode() to ensure the same job_id shared across all ranks.
     job_id = now()
 
-    cfg = Config(parse_args())
+    args = parse_args()
+    cfg = Config(args)
+    wandb.init(config=OmegaConf.to_container(cfg.config, resolve=True), project='epic-kitchens-grounded')
 
     init_distributed_mode(cfg.run_cfg)
 
@@ -96,6 +102,7 @@ def main():
     runner = get_runner_class(cfg)(
         cfg=cfg, job_id=job_id, task=task, model=model, datasets=datasets
     )
+    # if input('>?'):from IPython import embed;embed()
     runner.train()
     # runner.train() -> if runner_base -> runner.train_epoch() -> runner.task.train_epoch() : 
     # runner.task.train_step() : output = model(sample), loss = output.loss

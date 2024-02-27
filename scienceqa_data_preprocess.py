@@ -1,105 +1,53 @@
 import json
+from pathlib import Path
 from tqdm import tqdm
-    
-with open("scienceqa_problems_path.json", 'r') as file:
-    data = json.load(file)
-    
-with open("scienceqa_pid_splits.json") as file:
-    pid_splits = json.load(file)
 
-train_ids = pid_splits['train']
-val_ids = pid_splits['val']
-test_ids = pid_splits['test']
+# gdown 1nJ86OLnF2C6eDoi5UOAdTAS5Duc0wuTl
+# gdown 1OXlNBuW74dsrwYZIpQMshFqxkjcMPPgV
+# mv pid_splits.json scienceqa_pid_splits.json
+# mv problems.json scienceqa_problems_path.json
+# mkdir images && cd images
+# gdown 1swX4Eei1ZqrXRvM-JAZxN6QVwcBLPHV8
+# gdown 1eyjFaHxbvEJZzdZILn3vnTihBNDmKcIj
+# gdown 1ijThWZc1tsoqGrOCWhYYj1HUJ48Hl8Zz
 
-# make train annotation
+def convert(dataset_dir, data, ids, split):
+    annotation = []
+    for id in tqdm(ids):
+        d = data[str(id)]
+        if d['image'] is None:
+            continue
+        answer = d['answer']
+        letter = 'abcde'[min(answer, 4)]
+        annotation.append({
+            "image": f"images/{split}/{id}/image.png",
+            "question": d['question'],
+            "answer" : f"({letter}) {d['choices'][answer]}",
+            "choices": d['choices'],
+            "context" : f"{d['hint']} {d['lecture']}",
+            "question_id" : id,
+        })
 
-train_annotation = []
-for id in tqdm(train_ids):
-    train_data = data[str(id)]
-    if train_data['image'] is None:
-        continue
-    image_url = f"scienceqa/images/train/{id}/image.png"
-    if train_data['answer'] == 0:
-        answer = "(a) " + train_data['choices'][train_data['answer']]
-    elif train_data['answer'] == 1:
-       answer = "(b) " + train_data['choices'][train_data['answer']]
-    elif train_data['answer'] == 2:
-       answer = "(c) " + train_data['choices'][train_data['answer']]
-    elif train_data['answer'] == 3:
-        answer = "(d) " + train_data['choices'][train_data['answer']]
-    else:
-        answer = "(e) " + train_data['choices'][train_data['answer']]
-    ann = {
-        "image": image_url,
-        "question": train_data['question'],
-        "answer" : answer,
-        "choices": train_data['choices'],
-        "context" : train_data['hint'] + " " + train_data['lecture'],
-        "question_id" : id
-    }
-    train_annotation.append(ann)
+    out_fname = dataset_dir / f"scienceqa_{split}.json"
+    with open(out_fname, 'w') as file:
+        json.dump(annotation, file)
+    print(out_fname)
+    return out_fname, annotation
 
-# make val annotation
 
-val_annotation = []
-for id in tqdm(val_ids):
-    val_data = data[str(id)]
-    if val_data['image'] is None:
-        continue
-    image_url = f"scienceqa/images/val/{id}/image.png"
-    if val_data['answer'] == 0:
-        answer = "(a) " + val_data['choices'][val_data['answer']]
-    elif val_data['answer'] == 1:
-       answer = "(b) " + val_data['choices'][val_data['answer']]
-    elif val_data['answer'] == 2:
-       answer = "(c) " + val_data['choices'][val_data['answer']]
-    elif val_data['answer'] == 3:
-       answer = "(d) " + val_data['choices'][val_data['answer']]
-    else:
-        answer = "(e) " + val_data['choices'][val_data['answer']]
-    ann = {
-        "image": image_url,
-        "question": val_data['question'],
-        "answer" : answer,
-        "choices": val_data['choices'],
-        "context" : val_data['hint']+ " " + val_data['lecture'],
-        "question_id" : id
-    }
-    val_annotation.append(ann)
-    
-# make test annotation
+def main(dataset_dir):
+    dataset_dir = Path(dataset_dir).resolve()
+    with open(dataset_dir / "scienceqa_problems_path.json", 'r') as file:
+        data = json.load(file)
 
-test_annotation = []
-for id in tqdm(test_ids):
-    test_data = data[str(id)]
-    if test_data['image'] is None:
-        continue
-    image_url = f"scienceqa/images/test/{id}/image.png"
-    if test_data['answer'] == 0:
-        answer = "(a) " + test_data['choices'][test_data['answer']]
-    elif test_data['answer'] == 1:
-       answer = "(b) " + test_data['choices'][test_data['answer']]
-    elif test_data['answer'] == 2:
-       answer = "(c) " + test_data['choices'][test_data['answer']]
-    elif test_data['answer'] == 3:
-       answer = "(d) " + test_data['choices'][test_data['answer']]
-    else:
-        answer = "(e) " + test_data['choices'][test_data['answer']]
-    ann = {
-        "image": image_url,
-        "question": test_data['question'],
-        "answer" : answer,
-        "choices": test_data['choices'],
-        "context" :test_data['hint']+ " " + test_data['lecture'],
-        "question_id" : id
-    }
-    test_annotation.append(ann)
+    with open(dataset_dir / "scienceqa_pid_splits.json") as file:
+        pid_splits = json.load(file)
 
-with open("/input/scienceqa/scienceqa_train.json", 'w') as file:
-    json.dump(train_annotation, file)
+    # make train annotation
+    convert(dataset_dir, data, pid_splits['train'], 'train')
+    convert(dataset_dir, data, pid_splits['val'], 'val')
+    convert(dataset_dir, data, pid_splits['test'], 'test')
 
-with open("/input/scienceqa/scienceqa_test.json", 'w') as file:
-    json.dump(test_annotation, file)
-
-with open("/input/scienceqa/scienceqa_val.json", 'w') as file:
-    json.dump(val_annotation, file)
+if __name__ == '__main__':
+    import fire
+    fire.Fire(main)

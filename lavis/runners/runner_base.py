@@ -12,6 +12,8 @@ import os
 import time
 from pathlib import Path
 
+import wandb
+
 import torch
 import torch.distributed as dist
 import webdataset as wds
@@ -33,6 +35,8 @@ from lavis.datasets.datasets.dataloader_utils import (
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.data.dataset import ChainDataset
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 @registry.register_runner("runner_base")
@@ -181,7 +185,7 @@ class RunnerBase:
         """
         if self._dataloaders is None:
             # reoganize datasets by split and concatenate/chain if necessary
-            dataset_ratios = self.config.run_cfg.get("trai n_dataset_ratios", None)
+            dataset_ratios = self.config.run_cfg.get("train_dataset_ratios", None)
 
             # concatenate map-style datasets and chain wds.DataPipe datasets separately
             # training set becomes a tuple (ConcatDataset, ChainDataset), both are
@@ -360,6 +364,7 @@ class RunnerBase:
         best_epoch = 0
 
         self.log_config()
+        wandb.watch(self.model, log_freq=100)
 
         # resume from checkpoint if specified
         if not self.evaluate_only and self.resume_ckpt_path is not None:
@@ -391,6 +396,10 @@ class RunnerBase:
         count_for_early_stopping = 0   
         early_stopping_patience = 3 
         disable_early_stopping = self.config.run_cfg.get("disable_early_stopping", False)
+
+        # evaluation phase
+        if not self.evaluate_only and self.config.run_cfg.get('initial_evaluate', False):
+            self.evaluate(cur_epoch="initial", skip_reload=True)
         
         for cur_epoch in range(self.start_epoch, self.max_epoch):
             # training phase
@@ -411,7 +420,8 @@ class RunnerBase:
                     logging.info("Evaluating on {}.".format(split_name))
 
                     val_log = self.eval_epoch(
-                        split_name=split_name, cur_epoch=cur_epoch
+                        split_name=split_name, cur_epoch=cur_epoch,
+                        # skip_reload=True,
                     )
                     if val_log is not None:
                         if is_main_process():
@@ -452,7 +462,7 @@ class RunnerBase:
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         logging.info("Training time {}".format(total_time_str))
 
-    def evaluate(self, cur_epoch="best", skip_reload=False):
+    def evaluate(self, cur_epoch="best", skip_reload=False, log_stats=True):
         test_logs = dict()
 
         if len(self.test_splits) > 0:
@@ -460,6 +470,8 @@ class RunnerBase:
                 test_logs[split_name] = self.eval_epoch(
                     split_name=split_name, cur_epoch=cur_epoch, skip_reload=skip_reload
                 )
+                if log_stats:
+                    self.log_stats(test_logs[split_name], split_name)
 
             return test_logs
 
@@ -680,6 +692,7 @@ class RunnerBase:
             log_stats = {**{f"{split_name}_{k}": v for k, v in stats.items()}}
             with open(os.path.join(self.output_dir, "log.txt"), "a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+            wandb.log(log_stats)
         elif isinstance(stats, list):
             pass
 

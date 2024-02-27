@@ -1,0 +1,35 @@
+# Copyright (c) 2022, salesforce.com, inc.
+# All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+_BASE_: finetune_instructblip_epic_kitchens_base_light.yaml
+datasets:
+  epic_kitchens:
+    splits:
+      all:
+        n_frames: 6
+        include_detections: True
+      train: 
+        downsample_count: 5
+        fake_duplicate_count: 40
+      val: 
+        downsample_count: 5
+        # fake_duplicate_count: 2
+      test:
+        downsample_count: 5
+    build_info:
+      annotations:
+        train:
+          storage: ../../epic-kitchens-100-annotations/EPIC_100_train.csv
+        val:
+          storage: ../../epic-kitchens-100-annotations/EPIC_100_train.csv
+        test:
+          storage: ../../epic-kitchens-100-annotations/EPIC_100_train.csv
+
+run:
+  output_dir: "output/results/epic_kitchens/epic_kitchens_overfit"
+  test_splits: []
+  initial_evaluate: false
+  max_epoch: 20
+  # init_lr: 1e-3
+  # weight_decay: 0.01

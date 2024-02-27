@@ -64,22 +64,16 @@ class BaseDatasetBuilder:
     def build_processors(self):
         vis_proc_cfg = self.config.get("vis_processor")
         txt_proc_cfg = self.config.get("text_processor")
+        kw_proc_cfg = self.config.get("kw_processor")
 
         if vis_proc_cfg is not None:
-            vis_train_cfg = vis_proc_cfg.get("train")
-            vis_eval_cfg = vis_proc_cfg.get("eval")
-
-            self.vis_processors["train"] = self._build_proc_from_cfg(vis_train_cfg)
-            self.vis_processors["eval"] = self._build_proc_from_cfg(vis_eval_cfg)
+            self.vis_processors["train"] = self._build_proc_from_cfg(vis_proc_cfg.get("train"))
+            self.vis_processors["eval"] = self._build_proc_from_cfg(vis_proc_cfg.get("eval"))
 
         if txt_proc_cfg is not None:
-            txt_train_cfg = txt_proc_cfg.get("train")
-            txt_eval_cfg = txt_proc_cfg.get("eval")
-
-            self.text_processors["train"] = self._build_proc_from_cfg(txt_train_cfg)
-            self.text_processors["eval"] = self._build_proc_from_cfg(txt_eval_cfg)
+            self.text_processors["train"] = self._build_proc_from_cfg(txt_proc_cfg.get("train"))
+            self.text_processors["eval"] = self._build_proc_from_cfg(txt_proc_cfg.get("eval"))
         
-        kw_proc_cfg = self.config.get("kw_processor")
         if kw_proc_cfg is not None:
             for name, cfg in kw_proc_cfg.items():
                 self.kw_processors[name] = self._build_proc_from_cfg(cfg)
@@ -189,72 +183,56 @@ class BaseDatasetBuilder:
 
         ann_info = build_info.annotations
         vis_info = build_info.get(self.data_type)
+        split_info = self.config.get('splits') or {}
 
         datasets = dict()
         print("get keys data")
         print(ann_info.keys())
         for split in ann_info.keys():
-            if split not in ["train", "val", "test"]:
-                continue
-
             is_train = split == "train"
 
             # processors
-            vis_processor = (
-                self.vis_processors["train"]
-                if is_train
-                else self.vis_processors["eval"]
-            )
-            text_processor = (
-                self.text_processors["train"]
-                if is_train
-                else self.text_processors["eval"]
-            )
+            vis_processor = self.vis_processors["train" if is_train else "eval"]
+            text_processor = self.text_processors["train" if is_train else "eval"]
 
             # annotation path
             ann_paths = ann_info.get(split).storage
             if isinstance(ann_paths, str):
                 ann_paths = [ann_paths]
+            ann_paths = list(ann_paths)
 
-            abs_ann_paths = []
-            for ann_path in ann_paths:
+            for i, ann_path in enumerate(ann_paths):
                 if not os.path.isabs(ann_path):
-                    ann_path = utils.get_cache_path(ann_path)
-                abs_ann_paths.append(ann_path)
-            ann_paths = abs_ann_paths
+                    ann_paths[i] = utils.get_cache_path(ann_path)
 
             # visual data storage path
-            if split == "train":
-                vis_path = vis_info.train.storage 
-            if split == "val":
-                vis_path = vis_info.val.storage 
-            if split == "test":
-                vis_path = vis_info.test.storage 
-
+            vis_path = (vis_info.get(split) or vis_info).storage 
             if not os.path.isabs(vis_path):
-                # vis_path = os.path.join(utils.get_cache_path(), vis_path)
                 vis_path = utils.get_cache_path(vis_path)
 
             if not os.path.exists(vis_path):
                 warnings.warn("storage path {} does not exist.".format(vis_path))
 
+            # additional dataset arguments
+            kwargs = dict(split_info.get('all') or {}, **(split_info.get(split) or {}))
+            if 'splits' in self.config:
+                kwargs['split'] = split
+
             # create datasets
-            dataset_cls = self.train_dataset_cls if is_train else self.eval_dataset_cls
+            dataset_cls = self.train_dataset_cls
             if is_train:
-                datasets[split] = dataset_cls(
-                    vis_processor=vis_processor,
-                    text_processor=text_processor,
-                    ann_paths=ann_paths,
-                    vis_root=vis_path,
-                    train_samples_portion=self.train_samples_portion
-                )
-            else:
-                datasets[split] = dataset_cls(
-                    vis_processor=vis_processor,
-                    text_processor=text_processor,
-                    ann_paths=ann_paths,
-                    vis_root=vis_path,
-                )
+                kwargs['train_samples_portion'] = self.train_samples_portion
+            elif self.eval_dataset_cls is not None:
+                dataset_cls = self.eval_dataset_cls
+
+            datasets[split] = dataset_cls(
+                vis_processor=vis_processor,
+                text_processor=text_processor,
+                ann_paths=ann_paths,
+                vis_root=vis_path,
+                **kwargs,
+            )
+            print("dataset", split, len(datasets[split]), kwargs)
 
         return datasets
 
