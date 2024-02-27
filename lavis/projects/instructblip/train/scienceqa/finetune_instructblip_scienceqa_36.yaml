@@ -47,7 +47,7 @@ run:
   inference_method: "rank"
 
   seed: 42
-  output_dir: "/output/results/scienceqa/scienceqa_36"
+  output_dir: "output/results/scienceqa/scienceqa_36"
 
   amp: True
   resume_ckpt_path: null
