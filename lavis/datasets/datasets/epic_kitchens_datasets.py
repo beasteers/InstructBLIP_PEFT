@@ -15,7 +15,8 @@ import supervision as sv
 import cv2
 
 from lavis.datasets.datasets.base_dataset import BaseDataset
-from lavis.common.predicate_utils import load_pddl_yaml, Predicate
+from lavis.common.predicate_utils.predicate_utils import load_pddl_yaml, Predicate
+from lavis.common.predicate_utils.prompts import get_prompt_function
 # from torchvision import datasets
 
 
@@ -31,10 +32,10 @@ FRAME_TASK_2 = (
 )
 
 
-def qa_1(ann):
-    text_input = 'Describe the state of the {noun}:'.format(**ann)
-    text_output = ', '.join(sorted(ann['state']))
-    return text_input, text_output
+# def qa_1(ann):
+#     text_input = 'Describe the state of the {noun}:'.format(**ann)
+#     text_output = ', '.join(sorted(ann['state']))
+#     return text_input, text_output
 
 
 # def qa_2(ann, translate, detection_labels=None):
@@ -84,37 +85,37 @@ def qa_1(ann):
     
 #     return text_input.strip(), text_output.strip()
 
-def qa_2(ann, detection_labels=None):
-    noun = ann['noun']
-    all_nouns = ann['all_nouns']
-    # state = ann['state']
-    action = ann['action']
-    candidate_state = action.get_state(action.vars[0], ann['pre_post'])
-    random.shuffle(candidate_state)
-    noun_dict = action.var_dict(all_nouns)
+# def qa_2(ann, detection_labels=None):
+#     noun = ann['noun']
+#     all_nouns = ann['all_nouns']
+#     # state = ann['state']
+#     action = ann['action']
+#     candidate_state = action.get_state(action.vars[0], ann['pre_post'])
+#     random.shuffle(candidate_state)
+#     noun_dict = action.var_dict(all_nouns)
 
-    state_input = []
-    state_output = []
-    for s in candidate_state:
-        state_input.append(s.switch(True).format(**noun_dict))
-        state_output.append(s.format(**noun_dict))
+#     state_input = []
+#     state_output = []
+#     for s in candidate_state:
+#         state_input.append(s.switch(True).format(**noun_dict))
+#         state_output.append(s.format(**noun_dict))
 
-    state_list = " ".join(set(f'{x}.' for x in state_input))
-    text_output = " ".join(set(f'{x}.' for x in state_output))
+#     state_list = " ".join(set(f'{x}.' for x in state_input))
+#     text_output = " ".join(set(f'{x}.' for x in state_output))
 
-    objs = ''
-    if detection_labels is not None:
-        objs = f"Objects in scene: {', '.join(f'{i}: {o}' for i, o in enumerate(detection_labels))}.  "
+#     objs = ''
+#     if detection_labels is not None:
+#         objs = f"Objects in scene: {', '.join(f'{i}: {o}' for i, o in enumerate(detection_labels))}.  "
 
-    text_input = random.choice([
-        f'{objs}Based on the image, which of the following predicates apply to the "{noun}"? {state_list}. Answer: ',
-        f'{objs}Which of the following predicates apply to the "{noun}"? {state_list}  Answer: ',
-        f'{objs}Which of the following predicates describe the "{noun}"? {state_list}  Answer: ',
-        f'{objs}Which of the following apply to the "{noun}"? {state_list}  Answer: ',
-        f'{objs}Which of the following describe the "{noun}"? {state_list}  Answer: ',
-    ])
+#     text_input = random.choice([
+#         f'{objs}Based on the image, which of the following predicates apply to the "{noun}"? {state_list}. Answer: ',
+#         f'{objs}Which of the following predicates apply to the "{noun}"? {state_list}  Answer: ',
+#         f'{objs}Which of the following predicates describe the "{noun}"? {state_list}  Answer: ',
+#         f'{objs}Which of the following apply to the "{noun}"? {state_list}  Answer: ',
+#         f'{objs}Which of the following describe the "{noun}"? {state_list}  Answer: ',
+#     ])
     
-    return text_input.strip(), text_output.strip()
+#     return text_input.strip(), text_output.strip()
 
 # def qa_3(ann):
 #     text_input = 'What is the user doing?'.format(**ann)
@@ -123,17 +124,17 @@ def qa_2(ann, detection_labels=None):
 
 
 
-QA = {
-    "state_v1": qa_1,
-    "state_v2": qa_2,
+# QA = {
+#     "state_v1": qa_1,
+#     "state_v2": qa_2,
 
-}
+# }
 
 
 
 class EKVQADataset(BaseDataset):
     def __init__(self, vis_processor, text_processor, vis_root, ann_paths, split=None, 
-                 include_detections=False, n_frames=None, outer_buffer=60, inner_buffer=30, downsample_count=None, fake_duplicate_count=None, qa_format='state_v2', **kw):
+                 include_detections=False, n_frames=None, outer_buffer=30, inner_buffer=10, downsample_count=None, fake_duplicate_count=None, qa_format='state_v2', **kw):
         super().__init__(vis_processor, text_processor, vis_root=vis_root, ann_paths=ann_paths)
         self.annotation_path = ann_paths[0]
         self.annotation_dir = os.path.dirname(self.annotation_path)
@@ -156,13 +157,23 @@ class EKVQADataset(BaseDataset):
         self._add_instance_ids()
 
         self.frame_file_format = 'frame_{:010d}.jpg'
-        self._get_qa = QA[qa_format]
+        # self._get_qa = QA[qa_format]
+        self._get_qa = get_prompt_function()
 
         # for i in tqdm.tqdm(range(len(self))):
         #     d = self[i]
 
     def __len__(self):
         return len(self.annotation)
+    
+    def _sorted_sample(self, frame_fnames, weights):
+        if self.n_frames != 'all':
+            frame_fnames = np.random.choice(
+                list(frame_fnames), 
+                min(self.n_frames or 1, len(frame_fnames)),
+                replace=False,
+                p=weights)
+        return sorted(frame_fnames)
 
     def __getitem__(self, index):
         ann = self.annotation[index]
@@ -173,55 +184,38 @@ class EKVQADataset(BaseDataset):
             print(f"WARNING: no frames - {index} {ann['video_id']} {ann['start_frame']} {ann['stop_frame']}")
             return self.__getitem__((index + 1)%len(self))
 
-        # select frames
-        sampled_frame_ids = list(frame_fnames)
-        if self.n_frames != 'all':
-            sampled_frame_ids = random.sample(list(frame_fnames), min(self.n_frames or 1, len(frame_fnames)))
-        sampled_frame_ids = sorted(sampled_frame_ids)
-        
-        # load frames
-        frames = [Image.open(frame_fnames[i]) for i in sampled_frame_ids]
-
-        # state_lookup = dict(zip(ann['state'], ann['state']))
-        # state_vector = np.array([bool(state_lookup[p]) if p in state_lookup else -1 for p in self.predicates])
-
         if self.include_detections:
             # load detection frames
-            detections = load_detections(self.json_dir, ann["narration_id"], sampled_frame_ids, np.array(frames[0]))
-            det_index = list({l for d in detections for l in d.data['labels']})
-            det_frames = [draw_masks(x, d, det_index) for x, d in zip(frames, detections)]
+            detections = load_detections(self.json_dir, ann["narration_id"])
+
+            # load frames
+            sampled_frame_ids = list(frame_fnames)
+            has_detection = np.array([i in detections for i in sampled_frame_ids])
+            sampled_frame_ids = self._sorted_sample(frame_fnames, has_detection * 10 + 1)
+            frames = [Image.open(frame_fnames[i]) for i in sampled_frame_ids]
+
+            # draw detection frames
+            det_index = list({l for i in detections for l in detections[i].data['labels']})
+            det_frames = [
+                draw_masks(x, get_dets(detections.get(i, {}), x), det_index) 
+                for x, i in zip(frames, sampled_frame_ids)
+            ]
             # interleave frames
             frames = [x for xs in zip(frames, det_frames) for x in xs]
+            # if any(len(d) for d in detections):
+            #     for i, f in enumerate(frames):
+            #         f.save(f'demo{i}.png')
+
+            # load question answer
             text_input, text_output = self._get_qa(ann, det_index)
-            if any(len(d) for d in detections):
-                for i, f in enumerate(frames):
-                    f.save(f'demo{i}.png')
         else:
+            # load frames
+            sampled_frame_ids = self._sorted_sample(frame_fnames)
+            frames = [Image.open(frame_fnames[i]) for i in sampled_frame_ids]
+
             # load question answer
             text_input, text_output = self._get_qa(ann)
 
-        # if any(len(d) for d in detections):
-        #     print(detections)
-            # for i, f in enumerate(frames):
-            #     f.save(f'demo{i}.png')
-        #     print({
-        #         # metadata
-        #         "narration": ann["narration"],
-        #         "noun": ann["noun"],
-
-        #         # ID
-        #         "image_id": index,
-        #         "narration_id": ann["narration_id"],
-        #         "instance_id": ann["instance_id"],
-        #         "question_id": ann["instance_id"],
-        #         "sample_id": index,
-
-        #         # QA pair
-        #         "prompt": text_input,
-        #         "text_input": text_input,
-        #         "text_output": text_output,
-        #     })
-        #     input()
         image = torch.stack([self.vis_processor(x) for x in frames], dim=0)
         if self.n_frames is None and image.size(0) == 1:
             # single image? for compatability
@@ -389,21 +383,18 @@ def norm_df(df, verb_df, noun_df):
 # Masks
 
 
-def load_detections(annotation_dir, narration_id, frame_ids, sample_frame):
+def load_detections(annotation_dir, narration_id):
     json_path = os.path.join(annotation_dir, f'{narration_id}.json')
     with open(json_path) as f:
         data = json.load(f)
-    data = {
+    return {
         int(d['image']['image_path'].split('_')[-1].split('.')[0]): d
         for d in data
     }
-    return [
-        get_dets(data.get(i, {}), sample_frame)
-        for i in frame_ids
-    ]
+
 
 def get_dets(frame_data, frame, scale=None):
-    anns = frame_data.get('annotations') or []
+    anns = (frame_data or {}).get('annotations') or []
 
     # extract annotation data
     xyxy = np.array([

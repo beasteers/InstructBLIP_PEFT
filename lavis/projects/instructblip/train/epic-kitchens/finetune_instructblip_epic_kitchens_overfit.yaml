@@ -2,13 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
-_BASE_: finetune_instructblip_epic_kitchens_base_light.yaml
+_BASE_: finetune_instructblip_epic_kitchens_3.yaml
 datasets:
   epic_kitchens:
     splits:
-      all:
-        n_frames: 6
-        include_detections: True
+      # all:
+      #   n_frames: 6
+      #   include_detections: True
       train: 
         downsample_count: 5
         fake_duplicate_count: 40

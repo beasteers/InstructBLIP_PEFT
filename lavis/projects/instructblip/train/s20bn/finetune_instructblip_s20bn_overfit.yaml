@@ -1,0 +1,38 @@
+# Copyright (c) 2022, salesforce.com, inc.
+# All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+_BASE_: finetune_instructblip_s20bn_1.yaml
+datasets:
+  s20bn:
+    splits:
+      all:
+        filter_verbs:
+        #  - tear-pieces
+        - open
+      train: 
+        downsample_count: 64
+        # fake_duplicate_count: 1
+      val: 
+        downsample_count: 64
+      test:
+        downsample_count: 64
+    build_info:
+      annotations:
+        train:
+          storage: /scratch/work/ptg/Something_ek_labels/s20bn_train.csv
+        val:
+          storage: /scratch/work/ptg/Something_ek_labels/s20bn_train.csv
+        test:
+          storage: /scratch/work/ptg/Something_ek_labels/s20bn_train.csv
+
+run:
+  output_dir: "output/results/s20bn/s20bn_overfit"
+  test_splits: []
+  initial_evaluate: false
+  max_epoch: 20
+  eval_every_n_epochs: 1
+  batch_size_train: 16
+  # init_lr: 1e-3
+  # weight_decay: 0.01
+  # num_workers: 0

@@ -6,7 +6,8 @@ _BASE_: finetune_instructblip_epic_kitchens_base.yaml
 datasets:
   epic_kitchens:
     splits:
-      # all:
+      all: {}
 
 run:
   output_dir: "output/results/epic_kitchens/epic_kitchens_1"
+  batch_size_train: 64

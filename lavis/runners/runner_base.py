@@ -396,10 +396,15 @@ class RunnerBase:
         count_for_early_stopping = 0   
         early_stopping_patience = 3 
         disable_early_stopping = self.config.run_cfg.get("disable_early_stopping", False)
+        eval_every_n_epochs = self.config.run_cfg.get("eval_every_n_epochs", 1)
 
         # evaluation phase
         if not self.evaluate_only and self.config.run_cfg.get('initial_evaluate', False):
-            self.evaluate(cur_epoch="initial", skip_reload=True)
+            # self.evaluate(cur_epoch="initial", skip_reload=True)
+            for split_name in self.valid_splits:
+                val_log = self.eval_epoch(split_name=split_name, cur_epoch='initial', skip_reload=True)
+                if val_log and is_main_process():
+                    self.log_stats(val_log, split_name)
         
         for cur_epoch in range(self.start_epoch, self.max_epoch):
             # training phase
@@ -415,7 +420,7 @@ class RunnerBase:
                 self.log_stats(split_name="train", stats=train_stats)
 
             # evaluation phase
-            if len(self.valid_splits) > 0:
+            if len(self.valid_splits) > 0 and not cur_epoch % eval_every_n_epochs:
                 for split_name in self.valid_splits:
                     logging.info("Evaluating on {}.".format(split_name))
 
@@ -462,7 +467,7 @@ class RunnerBase:
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         logging.info("Training time {}".format(total_time_str))
 
-    def evaluate(self, cur_epoch="best", skip_reload=False, log_stats=True):
+    def evaluate(self, cur_epoch="best", skip_reload=False, splits=None, log_stats=True):
         test_logs = dict()
 
         if len(self.test_splits) > 0:

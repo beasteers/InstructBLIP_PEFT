@@ -4,11 +4,14 @@ datasets:
     data_type: images # [images|videos|features]
 
     splits:
-      all: {}
+      all: 
+        json_dir: /vast/irr2020/EKU/FINAL
       train: {}
-      test: {}
+      test: 
+        include_video_ids: ../epic-kitchens-100-annotations/EPIC_test_video_ids.csv # XXX: fixme
       val:
-        downsample_count: 1000
+        exclude_video_ids: ../epic-kitchens-100-annotations/EPIC_test_video_ids.csv
+        downsample_count: 2000
 
     build_info:
       # Be careful not to append minus sign (-) before split to avoid itemizing

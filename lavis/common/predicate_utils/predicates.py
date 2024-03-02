@@ -1,33 +1,37 @@
-import os
 import re
-
+from collections import defaultdict
 
 class Predicate:
     def __init__(self, text, unknown=None, positive=None, negative=None):
-        self.unknown = unknown
-        self.positive = positive
-        self.negative = negative
         if isinstance(text, Predicate):
             self.name = text.name
             self.neg = text.neg
             self.vars = list(text.vars)
             self.positive = positive or text.positive
             self.negative = negative or text.negative
-            self.unknown = unknown or text.unknown
+            self.unknown = text.unknown if unknown is None else unknown
         else:
             m = re.findall(r'\((?:(not) \()?([=\w-]+)\s((?:\??\w+\s*)+)\)?\)', text)
             if not m:
                 raise ValueError(f"could not parse {text}")
             self.neg, self.name, var = m[0]
             self.vars = var.split()
+            self.unknown = unknown
+            self.positive = positive
+            self.negative = negative
         
         self.neg = bool(self.neg)
 
     def __hash__(self):
-        return hash((self.name, len(self.vars)))
+        # return hash((self.neg, self.name, tuple(self.vars)))
+        return hash(str(self))
+    
+    def __nonzero__(self):
+        return not self.neg
 
     def __eq__(self, other):
-        return (self.name, len(self.vars)) == (other.name, len(other.vars))
+        # return (self.neg, self.name, tuple(self.vars)) == (self.neg, other.name, tuple(self.vars))
+        return str(self) == str(other)
 
     def __str__(self):
         p = f'({self.name} {" ".join(self.vars)})'
@@ -58,10 +62,18 @@ class Predicate:
             o.vars = [trans.get(x,x) for x in o.vars]
         return others
 
-    def switch(self, on):
+    def flip(self, on):
         p=Predicate(self)
         p.neg=not on
         return p
+    
+    def norm_vars(self):
+        p=Predicate(self)
+        p.vars = [f'?{l}' for l in 'abcdefg'[:len(p.vars)]]
+        return p
+
+    def norm(self):
+        return self.flip(True).norm_vars()
 
 
 class Action:
@@ -84,34 +96,32 @@ class Action:
 
     def get_state_text(self, var, when, *nouns):
         nouns = self.var_dict(*nouns)
-        return [p.format(**nouns) for p in self.get_state(var)]
-
-    def postconditions(self, var, *nouns):
-        return format_predicates(self.post, var, self.vars, nouns)
+        return [p.format(**nouns) for p in self.get_state(var, when)]
 
     @classmethod
-    def from_dict(cls, data, translations):
+    def from_dict(cls, data, translations, axioms):
         pre = [Predicate(p) for p in data['preconditions']]
         post = [Predicate(p) for p in data['effects']]
-        for p in pre + post:
-            t = translations[p]
-            if t:
-                p.positive = t['positive']
-                p.negative = t['negative']
+        if axioms:
+            pre = add_axioms(pre, axioms)
+            post = add_axioms(post, axioms)
+        if translations:
+            for p in pre + post:
+                t = translations[p.norm()]
+                if t:
+                    p.positive = t['positive']
+                    p.negative = t['negative']
         return Action(data['name'], data['params'], pre, post)
-
-
-def format_predicates(predicates, var, vars, nouns):
-    assert var in vars, f'{var} not in {vars}'
-    nouns = dict(zip([x.strip('?') for x in vars], nouns))
-    return [p.format(**nouns) for p in predicates if p.vars[0] == var]
 
 
 def add_axioms(current, axioms):
     for x in list(current):
         for a in axioms:
             if a['context'] == x:
-                current.extend(a['context'].translate_vars(x, *a['implies']))
+                new = a['context'].translate_vars(x, *a['implies'])
+                # conflict = [x for x in current if x in new]
+                # assert not conflict
+                current.extend(new)
     return list(set(current))
 
 
@@ -121,26 +131,25 @@ def load_pddl_yaml(fname):
     with open(fname, 'r') as f:
         data = yaml.safe_load(f)
     
-    predicates = [Predicate(x) for x in data['predicates']]
-    predicates += [p.switch(False) for p in predicates]
+    pos_predicates = [Predicate(x) for x in data['predicates']]
+    # predicates = pos_predicates + [p.flip(False) for p in pos_predicates]
 
-    translations: dict[str, str] = data['translations']
-    actions: list[dict] = data['definitions']
     axioms: list[dict] = data['axioms']
     for d in axioms:
         d['context'] = Predicate(d['context'])
         d['implies'] = [Predicate(x) for x in d['implies']]
-    for d in actions:
-        p = [Predicate(x) for x in d['preconditions']]
-        e = [Predicate(x) for x in d['effects']]
-        p = [x for x in add_axioms(p, axioms) if x in predicates]
-        e = [x for x in add_axioms(e, axioms) if x in predicates]
-        d['preconditions'] = p
-        d['effects'] = e
 
-    translations = {Predicate(p): t for p, t in data['translations'].items()}
+    translations = {Predicate(p).norm(): t for p, t in data['translations'].items()}
     actions = {
-        d['name']: Action.from_dict(d, translations)
-        for d in actions
+        d['name']: Action.from_dict(d, translations, axioms)
+        for d in data['definitions']
     }
-    return actions, predicates
+    return actions, pos_predicates
+
+
+def get_predicate_frequencies(actions):
+    frequency = defaultdict(lambda: 0)
+    for name, act in actions.items():
+        for p in act.pre + act.post:
+            frequency[p.norm_vars()] += 1
+    return dict(frequency)

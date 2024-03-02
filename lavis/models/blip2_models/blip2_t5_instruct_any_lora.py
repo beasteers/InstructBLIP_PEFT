@@ -17,6 +17,7 @@ from torch.cuda.amp import autocast as autocast
 from transformers import T5TokenizerFast
 
 import transformers
+from transformers.activations import ACT2FN
 from peft import LoraConfig, get_peft_model
 
 from lavis.common.registry import registry
@@ -63,7 +64,10 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         num_few_shot_examples=0,
         few_shot_prob=0,
         qformer_text_input=True,
+        qformer_video_input=False,
+        qformer_max_video_frame_count=8,
         qformer_use_lora=True,
+        qformer_num_classes=None,
         llm_lora_r=8,
         llm_lora_apply="attn",
     ):
@@ -88,8 +92,11 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
 
         # --------------------------------- Q-Former --------------------------------- #
 
+        self.qformer_video_input = qformer_video_input
+        frame_width = qformer_max_video_frame_count if qformer_video_input else 1
+
         self.Qformer, self.query_tokens = self.init_Qformer(
-            num_query_token, self.visual_encoder.num_features
+            num_query_token, self.visual_encoder.num_features * frame_width
         )
 
         if not qformer_text_input:
@@ -131,6 +138,12 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         self.t5_proj = nn.Linear(
             self.Qformer.config.hidden_size, self.t5_model.config.hidden_size
         )
+
+        # Regression Head
+
+        self.fixed_cls = None
+        if qformer_num_classes:
+            self.fixed_cls = QFormerClassHead(self.Qformer.config.hidden_size, qformer_num_classes)
 
         # -------------------------------- Parameters -------------------------------- #
 
@@ -198,6 +211,11 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         query_tokens, query_atts = self._get_query_tokens(image)
         text_tokens = self._get_qformer_text_input(prompt, image)
         inputs_t5, atts_t5, q_output = self._encode_qformer_t5(image, query_tokens, query_atts, text_tokens, return_query_output=True)
+        cls_output = self._get_class_output(q_output, query_tokens, targets=samples['targets']) if samples.get('targets') is not None else None
+        
+        cls_loss = 0
+        if cls_output is not None:
+            cls_loss = cls_output['loss']
 
         fs_embeds, fs_atts = None, None
         if self.few_shot_prob > 0 and "few_shot_samples" in samples:
@@ -239,9 +257,9 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
                 return_dict=True,
                 labels=targets,
             )
-            loss = outputs.loss
+            lm_loss = outputs.loss
 
-            return {"loss": loss}
+            return {"loss": lm_loss + cls_loss, "lm_loss": lm_loss, "cls_loss": cls_loss}
 
     def prepare_few_shot_embeds(self, samples):
         this_n_fs = random.choices(
@@ -313,7 +331,7 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         query_tokens, query_atts = self._get_query_tokens(image)
         text_tokens = self._get_qformer_text_input(prompt, image)
 
-        inputs_t5, atts_t5 = self._encode_qformer_t5(image, query_tokens, query_atts, text_tokens)
+        inputs_t5, atts_t5, q_output = self._encode_qformer_t5(image, query_tokens, query_atts, text_tokens, return_query_output=True)
 
         input_tokens = self.t5_tokenizer(prompt, padding="longest", return_tensors="pt").to(image.device)
         encoder_atts = torch.cat([atts_t5, input_tokens.attention_mask], dim=1)
@@ -444,6 +462,18 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
             output_text = self._lemmatize(output_text)
 
         return output_text
+
+
+    def class_head(self, samples):
+        image = samples["image"]
+        prompt = samples["text_input"]
+
+        query_tokens, query_atts = self._get_query_tokens(image)
+        text_tokens = self._get_qformer_text_input(prompt, image)
+        q_output = self._encode_qformer(image, query_tokens, query_atts, text_tokens)
+        cls_output = self._get_class_output(q_output, query_tokens)
+        return cls_output['prediction']
+
 
     def predict_class(
         self,
@@ -654,174 +684,6 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         return lm_output
 
 
-    # def stage_1(self, samples):
-    #     image = samples["image"]
-    #     text = samples["text_input"]
-
-    #     image_embeds = self.ln_vision(self.visual_encoder(image))
-    #     image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
-    #         image.device
-    #     )
-
-    #     query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
-
-    #     query_output = self.Qformer.bert(
-    #         query_embeds=query_tokens,
-    #         encoder_hidden_states=image_embeds,
-    #         encoder_attention_mask=image_atts,
-    #         use_cache=True,
-    #         return_dict=True,
-    #     )
-
-    #     image_feats = F.normalize(
-    #         self.vision_proj(query_output.last_hidden_state), dim=-1
-    #     )
-
-    #     text_tokens = self.tokenizer(
-    #         text,
-    #         padding="max_length",
-    #         truncation=True,
-    #         max_length=self.max_txt_len,
-    #         return_tensors="pt",
-    #     ).to(image.device)
-    #     text_output = self.Qformer.bert(
-    #         text_tokens.input_ids,
-    #         attention_mask=text_tokens.attention_mask,
-    #         return_dict=True,
-    #     )
-    #     text_feat = F.normalize(
-    #         self.text_proj(text_output.last_hidden_state[:, 0, :]), dim=-1
-    #     )
-
-    #     ###============== Image-text Contrastive ===================###
-    #     image_feats_all = concat_all_gather(
-    #         image_feats
-    #     )  # [batch_size*num_gpu, num_query_tokens, embed_dim]
-    #     text_feat_all = concat_all_gather(text_feat)  # [batch_size*num_gpu, embed_dim]
-
-    #     sim_q2t = torch.matmul(
-    #         image_feats.unsqueeze(1), text_feat_all.unsqueeze(-1)
-    #     ).squeeze()
-    #     # [batch_size, batch_size*num_gpu, num_query_tokens]
-
-    #     # image-text similarity: aggregate across all query tokens
-    #     sim_i2t, _ = sim_q2t.max(-1)
-    #     sim_i2t = sim_i2t / self.temp
-
-    #     # text-query similarity: [batch_size, batch_size*num_gpu, num_query_tokens]
-    #     sim_t2q = torch.matmul(
-    #         text_feat.unsqueeze(1).unsqueeze(1), image_feats_all.permute(0, 2, 1)
-    #     ).squeeze()
-
-    #     # text-image similarity: aggregate across all query tokens
-    #     sim_t2i, _ = sim_t2q.max(-1)
-    #     sim_t2i = sim_t2i / self.temp  # [batch_size, batch_size*num_gpu]
-
-    #     rank = dist.get_rank()
-    #     bs = image.size(0)
-    #     targets = torch.linspace(rank * bs, rank * bs + bs - 1, bs, dtype=int).to(
-    #         image.device
-    #     )
-
-    #     if "image_id" in samples.keys(): #coco retrieval finetuning
-    #         image_ids = samples["image_id"].view(-1,1)
-    #         image_ids_all = concat_all_gather(image_ids)
-    #         pos_idx = torch.eq(image_ids, image_ids_all.t()).float()       
-    #         sim_targets = pos_idx / pos_idx.sum(1,keepdim=True)   
-    #         sim_targets = 0.9 * sim_targets + 0.1 * torch.ones_like(sim_targets) / sim_targets.size(1)
-
-    #         loss_t2i = -torch.sum(F.log_softmax(sim_t2i, dim=1)*sim_targets,dim=1).mean()
-    #         loss_i2t = -torch.sum(F.log_softmax(sim_i2t, dim=1)*sim_targets,dim=1).mean()     
-    #         loss_itc = (loss_t2i+loss_i2t)/2  
-    #     else:                     
-    #         loss_itc = (
-    #             F.cross_entropy(sim_i2t, targets, label_smoothing=0.1)
-    #             + F.cross_entropy(sim_t2i, targets, label_smoothing=0.1)
-    #         ) / 2
-
-    #     ###============== Image-text Matching ===================###
-    #     text_input_ids_world = concat_all_gather(text_tokens.input_ids)
-    #     text_attention_mask_world = concat_all_gather(text_tokens.attention_mask)
-    #     image_embeds_world = all_gather_with_grad(image_embeds)
-    #     with torch.no_grad():
-    #         if "image_id" in samples.keys():
-    #             mask = torch.eq(image_ids, image_ids_all.t())
-    #             sim_t2i.masked_fill_(mask, -10000)
-    #             sim_i2t.masked_fill_(mask, -10000)
-    #         else:    
-    #             sim_t2i[:, rank * bs : rank * bs + bs].fill_diagonal_(-10000)
-    #             sim_i2t[:, rank * bs : rank * bs + bs].fill_diagonal_(-10000)            
-                
-    #         weights_t2i = F.softmax(sim_t2i, dim=1)
-    #         weights_i2t = F.softmax(sim_i2t, dim=1)
-
-    #     # select a negative image for each text
-    #     image_embeds_neg = []
-    #     for b in range(bs):
-    #         neg_idx = torch.multinomial(weights_t2i[b], 1).item()
-    #         image_embeds_neg.append(image_embeds_world[neg_idx])
-    #     image_embeds_neg = torch.stack(image_embeds_neg, dim=0)
-
-    #     # select a negative text for each image
-    #     text_ids_neg = []
-    #     text_atts_neg = []
-    #     for b in range(bs):
-    #         neg_idx = torch.multinomial(weights_i2t[b], 1).item()
-    #         text_ids_neg.append(text_input_ids_world[neg_idx])
-    #         text_atts_neg.append(text_attention_mask_world[neg_idx])
-
-    #     text_ids_neg = torch.stack(text_ids_neg, dim=0)
-    #     text_atts_neg = torch.stack(text_atts_neg, dim=0)
-
-    #     text_ids_all = torch.cat(
-    #         [text_tokens.input_ids, text_tokens.input_ids, text_ids_neg], dim=0
-    #     )  # pos, pos, neg
-    #     text_atts_all = torch.cat(
-    #         [text_tokens.attention_mask, text_tokens.attention_mask, text_atts_neg],
-    #         dim=0,
-    #     )
-
-    #     query_tokens_itm = self.query_tokens.expand(text_ids_all.shape[0], -1, -1)
-    #     query_atts_itm = torch.ones(query_tokens_itm.size()[:-1], dtype=torch.long).to(
-    #         image.device
-    #     )
-    #     attention_mask_all = torch.cat([query_atts_itm, text_atts_all], dim=1)
-
-    #     image_embeds_all = torch.cat(
-    #         [image_embeds, image_embeds_neg, image_embeds], dim=0
-    #     )  # pos, neg, pos
-    #     image_atts_all = torch.ones(image_embeds_all.size()[:-1], dtype=torch.long).to(
-    #         image.device
-    #     )
-
-    #     output_itm = self.Qformer.bert(
-    #         text_ids_all,
-    #         query_embeds=query_tokens_itm,
-    #         attention_mask=attention_mask_all,
-    #         encoder_hidden_states=image_embeds_all,
-    #         encoder_attention_mask=image_atts_all,
-    #         return_dict=True,
-    #     )
-
-    #     vl_embeddings = output_itm.last_hidden_state[:, : query_tokens_itm.size(1), :]
-    #     vl_output = self.itm_head(vl_embeddings)
-    #     logits = vl_output.mean(dim=1)
-
-    #     itm_labels = torch.cat(
-    #         [torch.ones(bs, dtype=torch.long), torch.zeros(2 * bs, dtype=torch.long)],
-    #         dim=0,
-    #     ).to(image.device)
-    #     loss_itm = F.cross_entropy(logits, itm_labels)
-
-    #     return BlipOutput(
-    #         loss=loss_itc + loss_itm + loss_lm,
-    #         loss_itc=loss_itc,
-    #         loss_itm=loss_itm,
-    #         loss_lm=loss_lm,
-    #     )
-
-
-
 
     # ---------------------------------------------------------------------------- #
     #                                 Core Q-Former                                #
@@ -845,7 +707,14 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
     def _encode_vision(self, image):
         # TODO possible to encode video here? if image.dim() == 5:
         with self.maybe_autocast():
-            image_embeds = self.ln_vision(self.visual_encoder(image))
+            if image.dim() == 5:
+                B, T, C, H, W = image.size()
+                image = image.reshape(B*T, C, H, W)
+                image_embeds = self.ln_vision(self.visual_encoder(image))
+                _, L, C = image_embeds.size()
+                image_embeds = image_embeds.reshape(B, T*L, C)
+            else:
+                image_embeds = self.ln_vision(self.visual_encoder(image))
         image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(image.device)
         return image_embeds, image_atts
     
@@ -879,13 +748,7 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
 
 
     def _encode_qformer_t5(self, image, query_tokens, Qformer_atts=None, text_tokens=None, return_query_output=False):
-        if image.dim() == 5:
-            # B, T, C, H, W = image.size()
-            # image_flat = image.reshape(B*T, C, H, W)
-            # frame_inputs_t5, frame_atts_t5, query_output = self._encode_qformer_t5_single_image(image_flat, query_tokens, Qformer_atts, text_tokens)
-            # BT, Q, C2 = frame_inputs_t5.size(1)
-            # frame_inputs_t5 = frame_inputs_t5.reshape(B, T * Q, C2)
-            # frame_atts_t5 = frame_atts_t5.reshape(B, T * Q, C2)
+        if image.dim() == 5 and not self.qformer_video_input:
             inputs_t5, atts_t5, query_outputs = [], [], []
             for j in range(image.size(1)):
                 frame_inputs_t5, frame_atts_t5, query_output = self._encode_qformer_t5_single_image(image[:,j,:,:,:], query_tokens, Qformer_atts, text_tokens)
@@ -908,6 +771,11 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         atts_t5 = torch.ones(inputs_t5.size()[:-1], dtype=torch.long).to(image.device)
         return inputs_t5, atts_t5, query_output
 
+    def _get_class_output(self, q_output, query_tokens, targets=None):
+        if self.fixed_cls is not None:
+            x = q_output.last_hidden_state
+            x = x[:,:query_tokens.size(1),:]
+            return self.fixed_cls(x, targets=targets)
 
     def _lemmatize(self, answers):
         def apply(answer):
@@ -968,6 +836,10 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         few_shot_prob = cfg.get("few_shot_prob", 0.0)
 
         qformer_text_input = cfg.get("qformer_text_input", True)
+        qformer_video_input = cfg.get("qformer_video_input", False)
+        qformer_max_video_frame_count = cfg.get("qformer_max_video_frame_count", 8)
+
+        qformer_num_classes = cfg.get("qformer_num_classes", None)
         
         # TODO: if you want to control PEFT by config, you should add some varaibles here
         llm_lora_r = cfg.get("llm_lora_r", 8)
@@ -1005,6 +877,9 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
                 num_few_shot_examples=num_few_shot_examples,
                 few_shot_prob=few_shot_prob,
                 qformer_text_input=qformer_text_input,
+                qformer_video_input=qformer_video_input,
+                qformer_max_video_frame_count=qformer_max_video_frame_count,
+                qformer_num_classes=qformer_num_classes,
                 qformer_use_lora=self_attention_qv_lora or any(qkv) or self_attention_output_lora or qformer_crossattention_lora_o,
                 llm_lora_r=llm_lora_r,
                 llm_lora_apply=llm_lora_apply
@@ -1030,6 +905,8 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         else:
             state_dict = checkpoint
 
+        # Qformer.bert.encoder.layer.0.crossattention.self.key.weight
+
         # strict=False for peft layers
         msg = self.load_state_dict(state_dict, strict=False)
 
@@ -1037,3 +914,70 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         logging.info("load checkpoint from %s" % url_or_filename)
 
         return msg
+
+
+
+# class QFormerClassHead(nn.Module):
+#     def __init__(self, input_size, n_classes, hidden_act='gelu'):
+#         super().__init__()
+#         self.fn1 = nn.Linear(input_size, input_size)
+#         self.gru = nn.GRU(input_size, input_size, bidirectional=True, batch_first=True)
+#         self.fn2 = nn.Linear(input_size * 2, n_classes)
+#         self.act = ACT2FN[hidden_act]
+#         # self.loss = nn.BCELoss(reduction='none')
+#         self.loss = nn.BCEWithLogitsLoss(reduction='none')
+
+#     def forward(self, tokens, hidden_state=None, targets=None):
+#         x = self.fn1(tokens)
+#         x = self.act(x)
+#         x, hidden_state = self.gru(x, hidden_state)
+#         x = x[:, 0]
+#         x = self.act(x)
+#         logits = x = self.fn2(x)
+#         loss = 0
+#         if targets is not None:
+#             loss = self.loss(logits, targets.float())
+#             loss = (loss[targets >= 0]).sum() / max(1, (targets >= 0).sum())
+#         y = F.sigmoid(x)
+#         return {
+#             'loss': loss,
+#             'hidden_state': hidden_state,
+#             'prediction': y,
+#         }
+    
+class QFormerClassHead(nn.Module):
+    def __init__(self, input_size, n_classes, nhead=8, num_encoder_layers=1, seq_len=500, hidden_act='gelu'):
+        super().__init__()
+        self.cls_token = nn.Parameter(torch.randn(1, 1, input_size))
+        self.pos_encoder = nn.Parameter(torch.randn(1, seq_len + 1, input_size))  # Assuming max seq length + cls token
+        encoder_layers = nn.TransformerEncoderLayer(d_model=input_size, nhead=nhead, activation=hidden_act)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer=encoder_layers, num_layers=num_encoder_layers)
+        self.fn1 = nn.Linear(input_size, input_size)
+        self.fn2 = nn.Linear(input_size, n_classes)
+        self.act = nn.GELU()
+        self.loss = nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, tokens, targets=None):
+        cls_tokens = self.cls_token.expand(tokens.size(0), -1, -1)
+        tokens = torch.cat((cls_tokens, tokens), dim=1)
+
+        # Add positional encodings
+        tokens += self.pos_encoder[:, :tokens.size(1), :]
+
+        x = self.fn1(tokens)
+        x = self.act(x)
+        x = self.transformer_encoder(x)
+        x = x[:, 0]
+        x = self.act(x)
+        logits = self.fn2(x)
+
+        loss = 0
+        if targets is not None:
+            loss = self.loss(logits, targets.float())
+            loss = (loss[targets >= 0]).sum() / max(1, (targets >= 0).sum())
+        
+        y = torch.sigmoid(logits)
+        return {
+            'loss': loss,
+            'prediction': y,
+        }

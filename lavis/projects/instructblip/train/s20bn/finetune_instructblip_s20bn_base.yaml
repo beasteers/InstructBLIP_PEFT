@@ -28,13 +28,16 @@ model:
   # qformer_crossattention_lora_k: False
   # qformer_crossattention_lora_v: False
   # qformer_crossattention_lora_o: False
-  qformer_num_classes: 60
+  qformer_num_classes: 37
+  # qformer_video_input: True
+
 
 datasets:
-  epic_kitchens:
+  s20bn:
     train_samples_portion: all
-    # splits:
-    #   all: 
+    splits:
+      all:
+        include_detections: True
     #   train: 
     #   val: 
     #   test: 
@@ -68,14 +71,14 @@ run:
   num_workers: 12
 
   # inference-specific
-  max_len: 24
+  max_len: 96
   min_len: 1
   num_beams: 16
   num_ans_candidates: 16
   inference_method: "rank"
 
   seed: 42
-  output_dir: "output/results/epic_kitchens/epic_kitchens_1"
+  output_dir: "output/results/s20bn/s20bn_1"
 
   amp: True
   resume_ckpt_path: null

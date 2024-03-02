@@ -13,6 +13,8 @@ from re import L
 import numpy as np
 import torch
 # from scipy.optimize import linear_sum_assignment
+from sklearn.metrics import accuracy_score, f1_score, multilabel_confusion_matrix
+import matplotlib.pyplot as plt
 from lavis.common.registry import registry
 import lavis.common.dist_utils as dist_utils
 from lavis.common.vqa_tools.vqa_clean import VQACleaner
@@ -46,6 +48,13 @@ class EpicKitchensTask(BaseTask):
             min_len=run_cfg.min_len,
         )
 
+    def build_datasets(self, cfg):
+        datasets = super().build_datasets(cfg)
+        # for name, dataset in datasets.items():
+        #     dataset
+        first = datasets[list(datasets)[0]]
+        self.classes = first['val'].classes
+        return datasets
 
     def valid_step(self, model, samples):
         results = []
@@ -58,23 +67,49 @@ class EpicKitchensTask(BaseTask):
             min_length=self.min_len,
         )
 
+        cls_pred = None
+        if samples.get('targets') is not None and model.fixed_cls is not None:
+            cls_pred = model.class_head(samples)                
+
         for i in range(len(answer_pred)):
-            results.append({
+            r = {
+                "question": samples["text_input"][i],
                 "answer_pred": answer_pred[i], 
                 "answer_true": samples["text_output"][i],
                 "image_id": samples["image_id"][i].item(), 
                 "narration_id": samples["narration_id"][i], 
                 "noun": samples["noun"][i], 
-            })
+            }
+            if cls_pred is not None:
+                r.update({
+                    "cls_pred": cls_pred[i].cpu().numpy().tolist(),
+                    "cls_true": samples['targets'][i].cpu().numpy().tolist(),
+                    # "cls_labels": samples['class_labels'][i].cpu().numpy().tolist(),
+                })
+            # yt=samples['targets'][i].cpu().numpy()
+            # yp=cls_pred[i].cpu().numpy()
+            # print(np.array(self.classes)[yt!=-1])
+            # print(yt[yt!=-1])
+            # print((yp[yt!=-1] >= 0.5).astype(int))
+            # print(np.round(yp[yt!=-1], 3))
+            # if input('>?'):from IPython import embed;embed()
+            results.append(r)
             if samples['sample_id'][i].item() in self.sample_index:
                 print("Sample:", samples['sample_id'][i], samples["narration_id"][i], samples["narration"][i])
+                print("in:", samples['text_input'][i])
                 print("pred:", answer_pred[i])
                 print("true:", samples["text_output"][i])
+                yt=samples['targets'][i].cpu().numpy()
+                yp=cls_pred[i].cpu().numpy()
+                print(np.array(self.classes)[yt!=-1])
+                print(yt[yt!=-1])
+                print(np.round(yp[yt!=-1], 1))
                 self.result_table.add_data(
                     samples['sample_id'][i],
                     wandb.Video(norm_video(samples["image"][i]).cpu().numpy(), fps=3) 
                     if samples["image"].ndim == 5 else
                     wandb.Image(samples["image"][i].cpu()),
+                    samples["text_input"][i],
                     answer_pred[i],  # Predicted answer
                     samples["text_output"][i],  # True answer
                     samples["narration_id"][i],  # Narration ID
@@ -87,7 +122,7 @@ class EpicKitchensTask(BaseTask):
         super().before_evaluation(model, dataset, **kwargs)
         self.sample_index = np.random.choice(len(dataset), min(60, len(dataset)), replace=False)
         print("eval samples:", self.sample_index, len(dataset))
-        self.result_table = wandb.Table(columns=["index", "image", "answer_pred", "answer_true", "narration_id", "narration"])
+        self.result_table = wandb.Table(columns=["index", "image", "question", "answer_pred", "answer_true", "narration_id", "narration"])
 
     def after_evaluation(self, val_result, split_name, **kwargs):
         # Log the table
@@ -120,10 +155,21 @@ class EpicKitchensTask(BaseTask):
                 print("Could not parse", res["answer_pred"], e)
                 errors.append(res["answer_pred"])
                 acc.append(0)
+        
+        cls_metrics = {}
+        if results[0].get('cls_true') is not None:
+            try:
+                y_true = np.array([d['cls_true'] for d in results]).astype(int)
+                y_pred = np.array([d['cls_pred'] for d in results]).astype(float)
+                cls_metrics = compute_cls_metrics(y_true, y_pred)
+                plot_ml_cm(y_true, y_pred, self.classes)
+            except Exception:
+                import traceback
+                traceback.print_exc()
 
         # report metrics
         accuracy = np.mean(acc)
-        metrics = {"agg_metrics": accuracy, "accuracy": accuracy, "split": split}
+        metrics = {"agg_metrics": accuracy, "accuracy": accuracy, "split": split, **cls_metrics}
 
         with open(os.path.join(registry.get_path("output_dir"), f"log.txt"), "a") as f:
             f.write(json.dumps(metrics) + "\n")
@@ -208,3 +254,64 @@ def norm_video(img):
         t.sub_(low).div_(max(high - low, 1e-5))
     img = img.mul(255).clamp(0, 255).byte()
     return img
+
+
+def compute_cls_metrics(y_true, y_pred, threshold=0.5):
+    y_true = y_true.astype(int)
+    y_pred = (y_pred > threshold).astype(int)
+    y_true = y_true.flatten()
+    y_pred = y_pred.flatten()
+    y_pred = y_pred[y_true != -1]
+    y_true = y_true[y_true != -1]
+    return {
+        'cls_acc': accuracy_score(y_true, y_pred), 
+        'cls_f1_macro': f1_score(y_true, y_pred, average='macro', zero_division=1), 
+        'cls_f1_micro': f1_score(y_true, y_pred, average='micro', zero_division=1),
+    }
+
+
+def plot_ml_cm(y_true, y_pred, labels, ncols=8, threshold=0.5, s=3):
+    # Compute multilabel confusion matrix
+    y_pred = (y_pred > threshold).astype(int)
+    # mask = y_true == -1
+    # y_true_masked = np.where(mask, y_pred, y_true)
+    # mcm = multilabel_confusion_matrix(y_true_masked, y_pred)
+    # mcm = np.stack([
+    #     np.stack([(y_true == 0) & (y_pred == 0), (y_true == 0) & (y_pred == 1)], axis=1),
+    #     np.stack([(y_true == 1) & (y_pred == 0), (y_true == 1) & (y_pred == 1)], axis=1),
+    # ], axis=1)
+    mcm = np.zeros((len(labels), 2, 2))
+    for yt, yp in zip(y_true, y_pred):
+        for j, (yti, ypi) in enumerate(zip(yt, yp)):
+            if yti != -1:
+                # print(labels[j], yti, ypi)
+                mcm[j, yti, ypi] += 1
+    mcm = mcm.astype(float) / np.maximum(1, mcm.sum(-1, keepdims=True))
+
+    # Plotting the confusion matrices for each label
+    nrows = int(np.ceil(len(mcm)/ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(s * ncols, s * nrows))
+    for i, (label, ax) in enumerate(zip(labels, axes.flat)):
+        # Confusion matrix for each label
+        cm = mcm[i]
+        
+        # Display the confusion matrix
+        cax = ax.matshow(cm, cmap='bone_r', vmin=0, vmax=1)
+        # fig.colorbar(cax, ax=ax)
+        
+        # Annotate the matrix with text
+        for (j, k), val in np.ndenumerate(cm):
+            ax.text(k, j, f'{val:.0%}', ha='center', va='center', color='red')
+
+        # Set labels and titles
+        ax.set_xlabel('Predicted labels')
+        ax.set_ylabel('True labels')
+        ax.set_title(f'{label}')
+        ax.set_xticks([0, 1])
+        ax.set_yticks([0, 1])
+
+    # fig.colorbar(im, ax=axes.ravel().tolist())
+    plt.tight_layout()
+
+    plt.savefig("confusion_matrix.png")
+    wandb.log({"confusion_matrix": wandb.Image("confusion_matrix.png")})

@@ -22,7 +22,7 @@ def base_load(cfg_path):
     cfg_path = config.get('_BASE_')
     while cfg_path:
         cfg_path = os.path.join(cfg_root, cfg_path)
-        print(f"Loading {cfg_path}")
+        print(f"Inheriting base: {cfg_path}")
         config = OmegaConf.load(cfg_path)
         configs.append(config)
         cfg_path = config.get('_BASE_')

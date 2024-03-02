@@ -11,3 +11,4 @@ datasets:
 
 run:
   output_dir: "output/results/epic_kitchens/epic_kitchens_3"
+  batch_size_train: 96
