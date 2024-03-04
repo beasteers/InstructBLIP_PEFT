@@ -46,6 +46,7 @@ from lavis.models.blip2_models.blip2_vicuna_instruct_qformer_lora import Blip2Vi
 from lavis.models.blip2_models.blip2_t5_instruct_qformer_llm_lora import Blip2T5InstructQformerLLMLoRA
 from lavis.models.blip2_models.blip2_vicuna_instruct_qformer_llm_lora import Blip2VicunaInstructQformerLLMLoRA
 from lavis.models.blip2_models.blip2_t5_instruct_any_lora import Blip2T5InstructAnyLoRA
+from lavis.models.blip2_models.blip2_t5_instruct_qformer_lora_clsf import Blip2T5InstructQformerLoRAClsf
 
 from lavis.models.blip_diffusion_models.blip_diffusion import BlipDiffusion
 

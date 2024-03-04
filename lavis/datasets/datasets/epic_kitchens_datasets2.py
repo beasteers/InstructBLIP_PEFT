@@ -38,8 +38,8 @@ class EKVQADataset(BaseDataset):
 
 
 class EpicKitchensDataset(VideoFrameDataset):
-    def __init__(self, annotation_path, vis_root, json_dir, vis_processor, downsample_count=None, fake_duplicate_count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None, **kw):
-        annotations, predicates, predicate_counts = load_epic_kitchens_dataset(annotation_path, downsample_count, outer_buffer, inner_buffer, include_video_ids, exclude_video_ids, filter_verbs)
+    def __init__(self, annotation_path, vis_root, json_dir, vis_processor, downsample_count=None, fake_duplicate_count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None, shuffle=True, **kw):
+        annotations, predicates, predicate_counts = load_epic_kitchens_dataset(annotation_path, downsample_count, outer_buffer, inner_buffer, include_video_ids, exclude_video_ids, filter_verbs, shuffle)
         if fake_duplicate_count:
             annotations = annotations * fake_duplicate_count
         self.json_dir = json_dir
@@ -59,7 +59,7 @@ class EpicKitchensDataset(VideoFrameDataset):
 # 
 
 
-def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None):
+def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None, shuffle=True):
     df = load_annotation_csv(annotation_path)
 
     # use video split list
@@ -88,19 +88,22 @@ def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inn
         for p in act.pre + act.post:
             p = p.norm_vars()
             if p not in predicate_counts:
-                print("WARNING:", p, "is in an action but not in the predicate class list")
+                print("WARNING:", p, f"is in action {name} but not in the predicate class list")
                 predicate_counts[p] = 0
-            predicate_counts[p] += 1
-    with open('predicate_counts.json', 'w') as f:  # debug
-        json.dump({str(k): c for k, c in predicate_counts.items()}, f)
-    total = sum(predicate_counts.values())
-    predicate_counts = {k: 5 * np.log(total / (c+1)) for k, c in predicate_counts.items()}
+    #         predicate_counts[p] += 1
+    # with open('predicate_counts.json', 'w') as f:  # debug
+    #     json.dump({str(k): c for k, c in predicate_counts.items()}, f)
+    # total = sum(predicate_counts.values())
+    # predicate_counts = {k: 5 * np.log(total / (c+1)) for k, c in predicate_counts.items()}
+    
     # print(predicate_counts)
 
     
-    # if count:
-    #     count = int(count * len(df) if count <= 1 else count)
-    #     df = df.sample(frac=1)
+    if count:
+        count = int(count * len(df) if count <= 1 else count)
+    # if shuffle:
+    #     print("SHUFFLING")
+    #     df = df.sample(frac=1, random_state=12345)
     
     annotations = []
     for ann in tqdm.tqdm(df.to_dict('records'), desc=annotation_path.split(os.sep)[-1], leave=False):
@@ -123,6 +126,9 @@ def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inn
                     state=pre,
                     unknown_state=set(random.sample(predicates, len(predicates))) - set(pre),
                 ))
+                for p in pre:
+                    p = p.norm_vars()
+                    predicate_counts[p] += 1
             if post:
                 annotations.append(dict(
                     ann, 
@@ -133,11 +139,21 @@ def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inn
                     state=post,
                     unknown_state=set(random.sample(predicates, len(predicates))) - set(post),
                 ))
+                for p in post:
+                    p = p.norm_vars()
+                    predicate_counts[p] += 1
             if pre or post:
                 break
         if count and len(annotations) >= count:
             break
-    
+
+    # predicates = [p for p in predicates if predicate_counts.get(p.norm_vars()) and predicate_counts.get(p.flip(False).norm_vars())]
+
+    with open('predicate_counts.json', 'w') as f:  # debug
+        json.dump({str(k): c for k, c in predicate_counts.items()}, f, indent=2)
+    total = sum(predicate_counts.values())
+    predicate_counts = {k: total / (c+1) for k, c in predicate_counts.items()}
+
     return annotations, predicates, predicate_counts
 
 
@@ -182,6 +198,10 @@ def load_annotation_csv(annotation_path):
         df['noun_norm'] = noun_df.key.loc[df.noun_class].values
     except FileNotFoundError:
         df['noun_norm'] = df.noun
+
+    df['noun'] = df.noun.apply(fix_colon)
+    df['noun_norm'] = df.noun_norm.apply(fix_colon)
+    df['all_nouns'] = df.all_nouns.apply(lambda xs: [fix_colon(x) for x in xs])
     return df
 
 

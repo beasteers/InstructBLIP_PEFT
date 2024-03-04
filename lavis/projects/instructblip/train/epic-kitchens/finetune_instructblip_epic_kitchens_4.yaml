@@ -7,8 +7,11 @@ datasets:
   epic_kitchens:
     splits:
       all:
-        n_frames: 6
+        n_frames: 3
         include_detections: True
 
 run:
   output_dir: "output/results/epic_kitchens/epic_kitchens_4"
+  batch_size_train: 64
+  batch_size_eval: 64
+  num_beams: 4

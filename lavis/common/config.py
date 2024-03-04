@@ -17,6 +17,7 @@ def base_load(cfg_path):
     # Load _BASE_ configs like in yacs
     configs = []
     cfg_root = os.path.dirname(cfg_path)
+    print(f"Loading config: {cfg_path}")
     config = OmegaConf.load(cfg_path)
     configs.append(config)
     cfg_path = config.get('_BASE_')

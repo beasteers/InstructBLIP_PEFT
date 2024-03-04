@@ -1,6 +1,21 @@
 
 
 
+ - lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_1.yaml
+
+```bash
+sbatch -J s20bn run_scripts/instructblip/train/run_finetune_instructblip_experiments.sbatch s20bn 1
+sbatch -J ek1 run_scripts/instructblip/train/run_finetune_instructblip_experiments.sbatch epic_kitchens 1
+sbatch -J ek2 run_scripts/instructblip/train/run_finetune_instructblip_experiments.sbatch epic_kitchens 2
+sbatch -J ek3 run_scripts/instructblip/train/run_finetune_instructblip_experiments.sbatch epic_kitchens 3
+sbatch -J ek4 run_scripts/instructblip/train/run_finetune_instructblip_experiments.sbatch epic_kitchens 4
+```
+
+
+
+
+
+
 ### Original ScienceQA Training
  - dataset config path: lavis/configs/datasets/scienceqa/defaults.yaml
  - model config path: lavis/configs/models/blip2/blip2_instruct_flant5xl_qformer_lora.yaml

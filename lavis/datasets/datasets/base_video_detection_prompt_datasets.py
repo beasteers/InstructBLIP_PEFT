@@ -15,14 +15,14 @@ from lavis.common.predicate_utils.masks import get_detections, draw_detections
 from lavis.common.predicate_utils.prompts import get_prompt_function
 
 class VideoFrameDataset(Dataset):
-    def __init__(self, annotations, vis_root, vis_processor, classes, get_prompt=None, include_detections=False, filename_format='{video_id}/frame_{i:010d}.jpg', n_frames=1):
+    def __init__(self, annotations, vis_root, vis_processor, classes, qa_prompt=None, include_detections=False, filename_format='{video_id}/frame_{i:010d}.jpg', n_frames=1):
         super().__init__()
         self.vis_processor = vis_processor
         self.annotations = annotations
         self.classes = classes
         for i, a in enumerate(annotations):
             a['instance_id'] = i
-        self.get_prompt = get_prompt_function(get_prompt)
+        self.get_prompt = get_prompt_function(qa_prompt)
         self.prompt_kw = {}
         self.n_frames = n_frames
         self.vis_root = vis_root
@@ -65,6 +65,7 @@ class VideoFrameDataset(Dataset):
             ]
             # interleave frames
             frames = [x for xs in zip(frames, det_frames) for x in xs]
+            # frames = det_frames
 
             # load question answer
             prompt, target = self.get_prompt(ann, object_index, **self.prompt_kw)
@@ -94,6 +95,9 @@ class VideoFrameDataset(Dataset):
             # class_labels = [str(c) for c in self.classes]
             predicates = [Predicate(c).norm_vars() for c in self.classes]
             class_targets = torch.as_tensor([1 if c.flip(True) in states else 0 if c.flip(False) in states else -1 for c in predicates])
+            # print(act.name)
+            # print(list(map(str, predicates)))
+            # print(class_targets)
             # print(states)
             # # print(prompt)
             # # print(target)
@@ -101,7 +105,8 @@ class VideoFrameDataset(Dataset):
             # print(class_targets[class_targets!=-1])
             # input()
 
-        video = torch.stack([self.vis_processor(x) for x in frames], dim=0)
+        # video = torch.stack([self.vis_processor(x) for x in frames], dim=0)
+        video = self.vis_processor(frames[1])
         return {
             # **ann,
             'image': video,

@@ -7,7 +7,26 @@ datasets:
   s20bn:
     splits:
       all: {}
-
+        # qa_prompt: 
+        #   - describe_predicates
+        #   - yes_no_predicate
+        #   - action_before_after
+        #   - action_complete
+        #   - object_id
+        #   - main_object_id
+        #   - object_from_predicate
+        # filter_verbs:
+        # #  - tear-pieces
+        # - open
+        # - close
+        # downsample_count: 1028
+        # shuffle: False
+      # train:
+      #   downsample_count: 40000
+      # val:
+      #   downsample_count: 500
+      # test:
+      #   downsample_count: 1000
 model:
   arch: blip2_t5_instruct_qformer_lora_clsf
   # qformer_num_classes: 2

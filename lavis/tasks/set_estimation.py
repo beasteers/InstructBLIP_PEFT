@@ -68,7 +68,7 @@ class EpicKitchensTask(BaseTask):
         )
 
         cls_pred = None
-        if samples.get('targets') is not None and model.fixed_cls is not None:
+        if samples.get('targets') is not None and getattr(model, 'fixed_cls', None) is not None:
             cls_pred = model.class_head(samples)                
 
         for i in range(len(answer_pred)):
@@ -99,19 +99,23 @@ class EpicKitchensTask(BaseTask):
                 print("in:", samples['text_input'][i])
                 print("pred:", answer_pred[i])
                 print("true:", samples["text_output"][i])
-                yt=samples['targets'][i].cpu().numpy()
-                yp=cls_pred[i].cpu().numpy()
-                print(np.array(self.classes)[yt!=-1])
-                print(yt[yt!=-1])
-                print(np.round(yp[yt!=-1], 1))
+                if cls_pred is not None:
+                    cs = np.array(self.classes)
+                    yt=samples['targets'][i].cpu().numpy()
+                    yp=cls_pred[i].cpu().numpy()
+                    print(cs[yt!=-1])
+                    print(yt[yt!=-1])
+                    print(np.round(yp[yt!=-1], 3))
                 self.result_table.add_data(
                     samples['sample_id'][i],
                     wandb.Video(norm_video(samples["image"][i]).cpu().numpy(), fps=3) 
                     if samples["image"].ndim == 5 else
                     wandb.Image(samples["image"][i].cpu()),
-                    samples["text_input"][i],
+                    samples["text_input"][i],  # question
                     answer_pred[i],  # Predicted answer
                     samples["text_output"][i],  # True answer
+                    '\n'.join(f'{c}[{t:.0f}]: {p:.3f}' for c, t, p in zip(cs[yt!=-1], yt[yt!=-1], yp[yt!=-1]))
+                    if cls_pred is not None else "",  # cls prediction
                     samples["narration_id"][i],  # Narration ID
                     samples["narration"][i]  # Narration text
                 )
@@ -120,9 +124,9 @@ class EpicKitchensTask(BaseTask):
 
     def before_evaluation(self, model, dataset, **kwargs):
         super().before_evaluation(model, dataset, **kwargs)
-        self.sample_index = np.random.choice(len(dataset), min(60, len(dataset)), replace=False)
+        self.sample_index = np.random.choice(len(dataset), min(90, len(dataset)), replace=False)
         print("eval samples:", self.sample_index, len(dataset))
-        self.result_table = wandb.Table(columns=["index", "image", "question", "answer_pred", "answer_true", "narration_id", "narration"])
+        self.result_table = wandb.Table(columns=["index", "image", "question", "answer_pred", "answer_true", "cls", "narration_id", "narration"])
 
     def after_evaluation(self, val_result, split_name, **kwargs):
         # Log the table
@@ -315,3 +319,4 @@ def plot_ml_cm(y_true, y_pred, labels, ncols=8, threshold=0.5, s=3):
 
     plt.savefig("confusion_matrix.png")
     wandb.log({"confusion_matrix": wandb.Image("confusion_matrix.png")})
+    plt.close()

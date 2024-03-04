@@ -4,7 +4,7 @@
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
 
 model:
-  arch: blip2_t5_instruct_any_lora
+  arch: blip2_t5_instruct_qformer_lora_clsf
   model_type: flant5xl
   load_pretrained: True #pretrain from scratch
   freeze_vit: True
@@ -29,6 +29,7 @@ model:
   # qformer_crossattention_lora_v: False
   # qformer_crossattention_lora_o: False
   qformer_num_classes: 60
+  qformer_cls_arch: dense
 
 datasets:
   epic_kitchens:

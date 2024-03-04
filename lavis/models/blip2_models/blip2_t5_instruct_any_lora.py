@@ -6,6 +6,7 @@
 """
 import logging
 import string
+import fnmatch
 import random
 import copy
 import os
@@ -65,7 +66,7 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         few_shot_prob=0,
         qformer_text_input=True,
         qformer_video_input=False,
-        qformer_max_video_frame_count=8,
+        # qformer_max_video_frame_count=8,
         qformer_use_lora=True,
         qformer_num_classes=None,
         llm_lora_r=8,
@@ -93,10 +94,10 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         # --------------------------------- Q-Former --------------------------------- #
 
         self.qformer_video_input = qformer_video_input
-        frame_width = qformer_max_video_frame_count if qformer_video_input else 1
+        # self.qformer_video_num_frames = qformer_max_video_frame_count if qformer_video_input else 1
 
         self.Qformer, self.query_tokens = self.init_Qformer(
-            num_query_token, self.visual_encoder.num_features * frame_width
+            num_query_token, self.visual_encoder.num_features
         )
 
         if not qformer_text_input:
@@ -211,6 +212,7 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         query_tokens, query_atts = self._get_query_tokens(image)
         text_tokens = self._get_qformer_text_input(prompt, image)
         inputs_t5, atts_t5, q_output = self._encode_qformer_t5(image, query_tokens, query_atts, text_tokens, return_query_output=True)
+        # q_output = self._encode_qformer(image, query_tokens, query_atts, text_tokens)
         cls_output = self._get_class_output(q_output, query_tokens, targets=samples['targets']) if samples.get('targets') is not None else None
         
         cls_loss = 0
@@ -259,7 +261,8 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
             )
             lm_loss = outputs.loss
 
-            return {"loss": lm_loss + cls_loss, "lm_loss": lm_loss, "cls_loss": cls_loss}
+        # lm_loss = 0
+        return {"loss": lm_loss + cls_loss, "lm_loss": lm_loss, "cls_loss": cls_loss}
 
     def prepare_few_shot_embeds(self, samples):
         this_n_fs = random.choices(
@@ -837,7 +840,7 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
 
         qformer_text_input = cfg.get("qformer_text_input", True)
         qformer_video_input = cfg.get("qformer_video_input", False)
-        qformer_max_video_frame_count = cfg.get("qformer_max_video_frame_count", 8)
+        # qformer_max_video_frame_count = cfg.get("qformer_max_video_frame_count", 8)
 
         qformer_num_classes = cfg.get("qformer_num_classes", None)
         
@@ -848,14 +851,15 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         alpha = cfg.get("lora_alpha", 16)
         dropout = cfg.get("lora_dropout", 0.05)
         
-        self_attention_qv_lora = cfg.get("self_attention_qv_lora", False)
-        self_attention_output_lora = cfg.get("self_attention_output_lora", False)
-        ffn_lora = cfg.get("ffn_lora", False)
+        qformer_lora_enabled = cfg.get("qformer_lora_enabled", True)
+        self_attention_qv_lora = cfg.get("self_attention_qv_lora", False) and qformer_lora_enabled
+        self_attention_output_lora = cfg.get("self_attention_output_lora", False) and qformer_lora_enabled
+        ffn_lora = cfg.get("ffn_lora", False) and qformer_lora_enabled
         
-        qformer_crossattention_lora_q = cfg.get("qformer_crossattention_lora_q", False)
-        qformer_crossattention_lora_k = cfg.get("qformer_crossattention_lora_k", False)
-        qformer_crossattention_lora_v = cfg.get("qformer_crossattention_lora_v", False)
-        qformer_crossattention_lora_o = cfg.get("qformer_crossattention_lora_o", False)
+        qformer_crossattention_lora_q = cfg.get("qformer_crossattention_lora_q", False) and qformer_lora_enabled
+        qformer_crossattention_lora_k = cfg.get("qformer_crossattention_lora_k", False) and qformer_lora_enabled
+        qformer_crossattention_lora_v = cfg.get("qformer_crossattention_lora_v", False) and qformer_lora_enabled
+        qformer_crossattention_lora_o = cfg.get("qformer_crossattention_lora_o", False) and qformer_lora_enabled
         qkv = [qformer_crossattention_lora_q, qformer_crossattention_lora_k, qformer_crossattention_lora_v]
 
         with lora(r, alpha, dropout, enabled=self_attention_qv_lora, qkv=qkv), \
@@ -878,7 +882,7 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
                 few_shot_prob=few_shot_prob,
                 qformer_text_input=qformer_text_input,
                 qformer_video_input=qformer_video_input,
-                qformer_max_video_frame_count=qformer_max_video_frame_count,
+                # qformer_max_video_frame_count=qformer_max_video_frame_count,
                 qformer_num_classes=qformer_num_classes,
                 qformer_use_lora=self_attention_qv_lora or any(qkv) or self_attention_output_lora or qformer_crossattention_lora_o,
                 llm_lora_r=llm_lora_r,
@@ -905,7 +909,14 @@ class Blip2T5InstructAnyLoRA(Blip2Base):
         else:
             state_dict = checkpoint
 
-        # Qformer.bert.encoder.layer.0.crossattention.self.key.weight
+        # if self.qformer_video_input:
+        #     for k, v in state_dict.items():
+        #         if any(fnmatch.fnmatch(k, p) for p in (
+        #                 "Qformer.bert.encoder.layer.*.crossattention.self.key.weight",
+        #                 "Qformer.bert.encoder.layer.*.crossattention.self.value.weight",
+        #         )):
+        #             print(f"Extending {k} with shape {v.shape} : {v.shape[0]} to {v.shape[0]*self.qformer_video_num_frames}")
+        #             state_dict[k] = v.repeat(self.qformer_video_num_frames, 1)
 
         # strict=False for peft layers
         msg = self.load_state_dict(state_dict, strict=False)
@@ -958,15 +969,15 @@ class QFormerClassHead(nn.Module):
         self.loss = nn.BCEWithLogitsLoss(reduction='none')
 
     def forward(self, tokens, targets=None):
+        tokens = self.fn1(tokens)
+        tokens = self.act(tokens)
         cls_tokens = self.cls_token.expand(tokens.size(0), -1, -1)
         tokens = torch.cat((cls_tokens, tokens), dim=1)
 
         # Add positional encodings
         tokens += self.pos_encoder[:, :tokens.size(1), :]
 
-        x = self.fn1(tokens)
-        x = self.act(x)
-        x = self.transformer_encoder(x)
+        x = self.transformer_encoder(tokens)
         x = x[:, 0]
         x = self.act(x)
         logits = self.fn2(x)
