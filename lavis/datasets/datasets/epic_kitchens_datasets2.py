@@ -1,5 +1,6 @@
 import os
 import json
+import orjson
 import tqdm
 import random
 import numpy as np
@@ -38,8 +39,13 @@ class EKVQADataset(BaseDataset):
 
 
 class EpicKitchensDataset(VideoFrameDataset):
-    def __init__(self, annotation_path, vis_root, json_dir, vis_processor, downsample_count=None, fake_duplicate_count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None, shuffle=True, **kw):
-        annotations, predicates, predicate_counts = load_epic_kitchens_dataset(annotation_path, downsample_count, outer_buffer, inner_buffer, include_video_ids, exclude_video_ids, filter_verbs, shuffle)
+    def __init__(self, annotation_path, vis_root, json_dir, vis_processor, 
+                 downsample_count=None, fake_duplicate_count=None, 
+                 outer_buffer=60, inner_buffer=2, 
+                 include_video_ids=None, exclude_video_ids=None, 
+                 filter_verbs=None, shuffle=True, predicate_freq_balancing=True, **kw):
+        annotations, predicates, predicate_counts = load_epic_kitchens_dataset(
+            annotation_path, downsample_count, outer_buffer, inner_buffer, include_video_ids, exclude_video_ids, filter_verbs, shuffle, predicate_freq_balancing)
         if fake_duplicate_count:
             annotations = annotations * fake_duplicate_count
         self.json_dir = json_dir
@@ -59,7 +65,7 @@ class EpicKitchensDataset(VideoFrameDataset):
 # 
 
 
-def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None, shuffle=True):
+def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None, shuffle=True, predicate_freq_balancing=True):
     df = load_annotation_csv(annotation_path)
 
     # use video split list
@@ -101,9 +107,9 @@ def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inn
     
     if count:
         count = int(count * len(df) if count <= 1 else count)
-    # if shuffle:
-    #     print("SHUFFLING")
-    #     df = df.sample(frac=1, random_state=12345)
+    if shuffle:
+        print("SHUFFLING")
+        df = df.sample(frac=1, random_state=12345)
     
     annotations = []
     for ann in tqdm.tqdm(df.to_dict('records'), desc=annotation_path.split(os.sep)[-1], leave=False):
@@ -147,13 +153,21 @@ def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inn
         if count and len(annotations) >= count:
             break
 
+    # if 'validation' in annotation_path:
+    #     with open('val_annotations.json', 'w') as f:  # debug
+    #         json.dump(annotations, indent=2)
+    print([d['narration_id'] for d in annotations[:10]])
+    print([d['narration_id'] for d in annotations[-10:]])
+    # input()
+
     # predicates = [p for p in predicates if predicate_counts.get(p.norm_vars()) and predicate_counts.get(p.flip(False).norm_vars())]
 
     with open('predicate_counts.json', 'w') as f:  # debug
         json.dump({str(k): c for k, c in predicate_counts.items()}, f, indent=2)
     total = sum(predicate_counts.values())
     predicate_counts = {k: total / (c+1) for k, c in predicate_counts.items()}
-
+    if predicate_freq_balancing is True:
+        predicate_counts = None
     return annotations, predicates, predicate_counts
 
 
@@ -233,8 +247,10 @@ def load_detections(annotation_dir, narration_id):  # TODO: slow. pre-dump masks
     if not os.path.isfile(json_path): 
         print(json_path, "doesn't exist")
         return {}
-    with open(json_path) as f:
-        data = json.load(f)
+    # with open(json_path) as f:
+    #     data = json.load(f)
+    with open(json_path, 'rb') as f:
+        data = orjson.loads(f.read())
     return {
         int(d['image']['image_path'].split('/')[-1].split('_')[-1].split('.')[0]): d
         for d in data

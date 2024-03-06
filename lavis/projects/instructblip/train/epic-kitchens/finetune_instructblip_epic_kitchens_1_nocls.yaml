@@ -2,16 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
-_BASE_: finetune_instructblip_epic_kitchens_base.yaml
-datasets:
-  epic_kitchens:
-    splits:
-      all:
-        n_frames: 3
-        include_detections: True
+_BASE_: finetune_instructblip_epic_kitchens_1.yaml
+
+model:
+  qformer_num_classes: null
 
 run:
-  output_dir: "output/results/epic_kitchens/epic_kitchens_4"
+  output_dir: "output/results/epic_kitchens/epic_kitchens_1"
   batch_size_train: 64
   batch_size_eval: 64
   num_beams: 4

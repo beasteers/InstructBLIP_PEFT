@@ -17,12 +17,12 @@ datasets:
         - close
         shuffle: False
       train: 
-        downsample_count: 16
+        downsample_count: 8
         fake_duplicate_count: 60
       val: 
-        downsample_count: 16
+        downsample_count: 8
       test:
-        downsample_count: 16
+        downsample_count: 8
     build_info:
       annotations:
         train:
@@ -36,15 +36,17 @@ model:
   # arch: blip2_t5_instruct_qformer_lora
   arch: blip2_t5_instruct_qformer_lora_clsf
   # qformer_lora_enabled: False
-  qformer_num_classes: 2
+  # qformer_num_classes: 2
   qformer_cls_arch: dense
   qformer_cls_loss_weight: 1
+  # load_finetuned: true
+  # finetuned: output/results/s20bn/s20bn_overfit/20240306150/checkpoint_best.pth
 
 run:
   output_dir: "output/results/s20bn/s20bn_overfit"
-  test_splits: []
+  test_splits: ["test"]
   initial_evaluate: false
-  max_epoch: 50
+  max_epoch: 10
   eval_every_n_epochs: 1
   batch_size_train: 64
   init_lr: 5e-4
@@ -52,3 +54,12 @@ run:
   # warmup_steps: 100
   # weight_decay: 0.05
   # num_workers: 0
+  evaluate: True
+  # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
+  # eval_ckpt_path: output/results/s20bn/s20bn_overfit/20240306144/checkpoint_best.pth  # overfit
+  # eval_ckpt_path: output/results/s20bn/s20bn_overfit/20240306150/checkpoint_best.pth
+  # eval_ckpt_path: output/results/s20bn/s20bn_overfit/20240306150/checkpoint_best.pth
+  eval_ckpt_path: output/results/s20bn/s20bn_overfit/20240306173/checkpoint_best.pth
+
+tags:
+ - overfit

@@ -98,6 +98,9 @@ class Action:
         nouns = self.var_dict(*nouns)
         return [p.format(**nouns) for p in self.get_state(var, when)]
 
+    def to_dict(self):
+        return {'pre': list(map(str, self.pre)), 'post': list(map(str, self.post))}
+
     @classmethod
     def from_dict(cls, data, translations, axioms):
         pre = [Predicate(p) for p in data['preconditions']]

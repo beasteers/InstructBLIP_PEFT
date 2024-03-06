@@ -104,7 +104,11 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
         num_params = sum([p.numel() for p in self.Qformer.parameters() if p.requires_grad])
         print(f"Number of trainable parameters in Qformer: {num_params}")
 
-        self.fixed_cls = CLS_HEAD[qformer_cls_arch](self.Qformer.config.hidden_size, qformer_num_classes)
+        self._cls_head = None
+        self.has_classifier = False
+        if qformer_num_classes:
+            self._cls_head = CLS_HEAD[qformer_cls_arch](self.Qformer.config.hidden_size, qformer_num_classes)
+            self.has_classifier = True
         self.qformer_cls_loss_weight = qformer_cls_loss_weight
         
         self.t5_tokenizer = T5TokenizerFast.from_pretrained(t5_model, truncation_side='left')
@@ -135,20 +139,6 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
         self.few_shot_prob = few_shot_prob
 
         self.qformer_text_input = qformer_text_input
-
-    # def get_optimizer_params(self, weight_decay, lr_scale=1):
-    #     params = list(self.fixed_cls.parameters())
-    #     for param in params:
-    #         param.requires_grad = False
-    #     opt = super().get_optimizer_params(weight_decay, lr_scale)
-    #     for param in params:
-    #         param.requires_grad = True
-    #     opt.append({
-    #         "weight_decay": weight_decay,
-    #         "params": params,
-    #         "lr_scale": 0.1
-    #     })
-    #     return opt
 
     def forward(self, samples):
         # print('-----------------')
@@ -192,6 +182,7 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
         
         # query_output.last_hidden_state = query_output.last_hidden_state.clone().detach()
         cls_output = self._get_class_output(query_output, query_tokens, samples['targets'])
+        cls_loss = cls_output['loss'] if cls_output is not None else 0
 
         fs_embeds, fs_atts = None, None
         if self.few_shot_prob > 0 and "few_shot_samples" in samples.keys():
@@ -236,9 +227,9 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
             loss = outputs.loss
 
             return {
-                "loss": loss + self.qformer_cls_loss_weight * cls_output['loss'],
+                "loss": loss + self.qformer_cls_loss_weight * cls_loss,
                 "lm_loss": loss,
-                "cls_loss": cls_output['loss'],
+                "cls_loss": cls_loss,
             }
         
     def _encode_vision(self, image):
@@ -775,14 +766,17 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
             )
         
         cls_output = self._get_class_output(query_output, query_tokens)
+        # print(samples['targets'])
+        # print(cls_output['logits'])
+        # input()
         return cls_output['prediction']
 
     def _get_class_output(self, q_output, query_tokens, targets=None):
-        if self.fixed_cls is not None:
+        if self._cls_head is not None:
             x = q_output.last_hidden_state
             x = x[:,:query_tokens.size(1),:]
             # x = torch.cat([x, image_embeds], dim=1)
-            return self.fixed_cls(x, targets=targets)
+            return self._cls_head(x, targets=targets)
 
 
     def _lemmatize(self, answers):

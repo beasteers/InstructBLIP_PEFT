@@ -13,19 +13,22 @@ from re import L
 import numpy as np
 import torch
 # from scipy.optimize import linear_sum_assignment
-from sklearn.metrics import accuracy_score, f1_score, multilabel_confusion_matrix
+from sklearn.metrics import accuracy_score, f1_score, multilabel_confusion_matrix, precision_score, recall_score
 import matplotlib.pyplot as plt
 from lavis.common.registry import registry
 import lavis.common.dist_utils as dist_utils
 from lavis.common.vqa_tools.vqa_clean import VQACleaner
 from lavis.tasks.base_task import BaseTask
+from lavis.common.predicate_utils.predicates import Predicate
 
 import wandb
 
 
+CLEAN = VQACleaner()
+
 @registry.register_task("epic_kitchens")
 class EpicKitchensTask(BaseTask):
-    clean = VQACleaner()
+    clean = CLEAN
     TRUTH = {
         'true': 'yes',
         'false': 'no',
@@ -54,6 +57,7 @@ class EpicKitchensTask(BaseTask):
         #     dataset
         first = datasets[list(datasets)[0]]
         self.classes = first['val'].classes
+        self.class_mismatch = False
         return datasets
 
     def valid_step(self, model, samples):
@@ -66,10 +70,14 @@ class EpicKitchensTask(BaseTask):
             max_length=self.max_len,
             min_length=self.min_len,
         )
+        # answer_pred = np.array(['']*len(samples['image']))
 
         cls_pred = None
-        if samples.get('targets') is not None and getattr(model, 'fixed_cls', None) is not None:
-            cls_pred = model.class_head(samples)                
+        if not self.class_mismatch and samples.get('targets') is not None and getattr(model, 'has_classifier', False):
+            cls_pred = model.class_head(samples)
+            if cls_pred.shape[1] != samples['targets'].shape[1]:
+                self.class_mismatch = True
+                cls_pred = None
 
         for i in range(len(answer_pred)):
             r = {
@@ -123,25 +131,28 @@ class EpicKitchensTask(BaseTask):
         return results
 
     def before_evaluation(self, model, dataset, **kwargs):
+        print("before eval",kwargs)
         super().before_evaluation(model, dataset, **kwargs)
         self.sample_index = np.random.choice(len(dataset), min(90, len(dataset)), replace=False)
         print("eval samples:", self.sample_index, len(dataset))
         self.result_table = wandb.Table(columns=["index", "image", "question", "answer_pred", "answer_true", "cls", "narration_id", "narration"])
 
-    def after_evaluation(self, val_result, split_name, **kwargs):
+    def after_evaluation(self, val_result, split_name, epoch='?', **kwargs):
         # Log the table
         print("write table", len(self.result_table.data))
         wandb.log({"predictions": self.result_table})
 
+        
+
         result_file = self.save_result(
             val_result,
             result_dir=registry.get_path("result_dir"),
-            filename=f"{split_name}_epic_kitchens_result",
+            filename=f"{split_name}_epic_kitchens_result_{epoch}",
             remove_duplicate="", 
         )
-        metrics = None
-        if split_name == 'val':
-            metrics = self._report_metrics(result_file=result_file, split=split_name)
+        # metrics = None
+        # if split_name == 'val':
+        metrics = self._report_metrics(result_file=result_file, split=split_name)
         return metrics
 
     @dist_utils.main_process
@@ -153,8 +164,7 @@ class EpicKitchensTask(BaseTask):
         acc = []
         for res in results:
             try:
-                # acc.append(self._yes_no_statement_jaccard(res["answer_pred"], res["answer_true"]))
-                acc.append(self._jaccard(res["answer_pred"], res["answer_true"]))
+                acc.append(jaccard_score(res["answer_pred"], res["answer_true"]))
             except Exception as e:
                 print("Could not parse", res["answer_pred"], e)
                 errors.append(res["answer_pred"])
@@ -165,8 +175,22 @@ class EpicKitchensTask(BaseTask):
             try:
                 y_true = np.array([d['cls_true'] for d in results]).astype(int)
                 y_pred = np.array([d['cls_pred'] for d in results]).astype(float)
-                cls_metrics = compute_cls_metrics(y_true, y_pred)
-                plot_ml_cm(y_true, y_pred, self.classes)
+                if y_true.shape[1] == y_pred.shape[1]:
+                    if split == 'val':
+                        cls_metrics.update(compute_cls_metrics(y_true, y_pred))
+                    else:
+                        cls_metrics.update(compute_metrics_with_partial_ground_truth(y_true, y_pred, threshold=0.5, prefix='cls_'))
+                    plot_ml_cm(y_true, y_pred, self.classes)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+        if split == 'test':
+            try:
+                txt_true = [d['answer_true'] for d in results]
+                txt_pred = [d['answer_pred'] for d in results]
+                y_true, y_pred, lm_classes = convert_text_to_manyhot(txt_true, txt_pred)
+                cls_metrics.update(compute_metrics_with_partial_ground_truth(y_true, y_pred, threshold=0.5, classes=lm_classes, prefix='lm_'))
+                plot_ml_cm(y_true, y_pred, lm_classes, prefix='lm_')
             except Exception:
                 import traceback
                 traceback.print_exc()
@@ -190,58 +214,10 @@ class EpicKitchensTask(BaseTask):
         y_pred = {self.clean(x) for x in split_text(y_pred, '.', ',', n=-1)}
         y_true = {self.clean(x) for x in split_text(y_true, '.', ',', n=-1)}
         return len(y_pred & y_true) / (len(y_pred | y_true) or 1)
-    
-    # def _yes_no_statement_jaccard(self, y_pred, y_true):
-    #     ans_pred = self._extract_yes_no_answer_format(y_pred)
-    #     # print('pred:', ans_pred, y_pred)
-    #     ans_true = self._extract_yes_no_answer_format(y_true)
-    #     # print('true:', ans_true)
-    #     intersection = sum(ans_pred[k] == ans_true[k] for k in set(ans_pred) & set(ans_true))
-    #     union = len(set(ans_pred) | set(ans_true))
-    #     return intersection / (union or 1)
-    
-    # def _extract_yes_no_answer_format(self, text):
-    #     # group answers by key
-    #     answers = defaultdict(lambda: set())
-    #     for x in split_text(text, '.', n=-1):
-    #         try:
-    #             key, value = split_text(x, ':', n=1)
-    #             value, *_ = split_text(value, ',', ' ', n=1)
-    #             key = self.clean(key)
-    #             value = self.clean(value)
-    #             value = self.TRUTH.get(value, value)
-    #             answers[key].add(value)
-    #         except Exception as e:
-    #             print("Could not parse substring", x, 'from', text, e)
-        
-    #     # filter answers
-    #     final_answers = {}
-    #     for k, values in answers.items():
-    #         values = [v for v in values if v in ('yes', 'no')]
-    #         if len(values) > 1:
-    #             continue
-    #         if values:
-    #             final_answers[k] = values[0]
-    #     return final_answers
 
-    # def _compare_text(self, y_pred, y_true):
-    #     y_pred = self.clean(y_pred)
-    #     y_true = self.clean(y_true)
-    #     return y_pred == y_true
 
-    # def _assignment_accuracy(self, txt_pred, txt_true, delim=','):
-    #     txt_pred = split_text(txt_pred, delim)
-    #     txt_true = split_text(txt_true, delim)
-    #     if not txt_pred or not txt_true:
-    #         return int(len(txt_true) == len(txt_pred))
 
-    #     accuracy_matrix = np.array([
-    #         [self._compare_text(yp, yt) for yp in txt_pred]
-    #         for yt in txt_true
-    #     ])
-    #     row, col = linear_sum_assignment(accuracy_matrix, maximize=True)
-    #     accuracy = accuracy_matrix[row, col]
-    #     return np.mean(accuracy)
+
 
 def split_text(text, *delims, n=-1):
     for d in delims:
@@ -260,6 +236,16 @@ def norm_video(img):
     return img
 
 
+ 
+def jaccard_score(y_pred, y_true):
+    # XXX: repetition/contradiction
+    y_pred = {CLEAN(x) for x in split_text(y_pred, '.', ',', n=-1)}
+    y_true = {CLEAN(x) for x in split_text(y_true, '.', ',', n=-1)}
+    return len(y_pred & y_true) / (len(y_pred | y_true) or 1)
+
+
+
+
 def compute_cls_metrics(y_true, y_pred, threshold=0.5):
     y_true = y_true.astype(int)
     y_pred = (y_pred > threshold).astype(int)
@@ -274,7 +260,92 @@ def compute_cls_metrics(y_true, y_pred, threshold=0.5):
     }
 
 
-def plot_ml_cm(y_true, y_pred, labels, ncols=8, threshold=0.5, s=3):
+def convert_text_to_manyhot(txt_true, txt_pred):
+    set_true = [{CLEAN(x) for x in split_text(t, '.', ',')} for t in txt_true]
+    set_pred = [{CLEAN(x) for x in split_text(t, '.', ',')} for t in txt_pred]
+    labels = sorted(
+        {value for s in set_true for value in s} | 
+        {value for s in set_pred for value in s}
+    )
+    y_true = np.array([[l in s for l in labels] for s in set_true], dtype=int)
+    y_pred = np.array([[l in s for l in labels] for s in set_pred], dtype=int)
+    return y_true, y_pred, labels
+
+
+def compute_metrics_with_partial_ground_truth(y_true, y_pred_logits, threshold=0.5, include_per_class=True, classes=None, prefix=''):
+    # Convert logits to binary predictions based on threshold
+    y_pred = (y_pred_logits > threshold).astype(int)
+    
+    # Initialize containers for aggregated metrics
+    precision_list, recall_list, f1_list = [], [], []
+    total_true_positives, total_false_positives, total_false_negatives, total_correct, total_valid = 0, 0, 0, 0, 0
+    
+    # Iterate over each class to compute metrics, excluding -1 in y_true
+    for i in range(y_true.shape[1]):
+        valid_indices = y_true[:, i] != -1
+        y_true_filtered = y_true[valid_indices, i]
+        y_pred_filtered = y_pred[valid_indices, i]
+        y_pred_filtered = y_pred_filtered > y_pred_filtered.mean()
+
+        # Compute class-wise metrics
+        precision = precision_score(y_true_filtered, y_pred_filtered, zero_division=0)
+        recall = recall_score(y_true_filtered, y_pred_filtered, zero_division=0)
+        f1 = f1_score(y_true_filtered, y_pred_filtered, zero_division=0)
+        
+        # Aggregate for macro average calculation
+        precision_list.append(precision)
+        recall_list.append(recall)
+        f1_list.append(f1)
+        
+        # Aggregate counts for micro average calculation
+        tp = (y_pred_filtered & y_true_filtered).sum()
+        fp = (y_pred_filtered & ~y_true_filtered).sum()
+        fn = (~y_pred_filtered & y_true_filtered).sum()
+        correct = (y_pred_filtered == y_true_filtered).sum()
+        
+        total_true_positives += tp
+        total_false_positives += fp
+        total_false_negatives += fn
+        total_correct += correct
+        total_valid += len(y_true_filtered)
+    
+    # Compute micro averages
+    precision_micro = total_true_positives / max(1, total_true_positives + total_false_positives)
+    recall_micro = total_true_positives / max(1, total_true_positives + total_false_negatives)
+    f1_micro = 2 * (precision_micro * recall_micro) / max(1, precision_micro + recall_micro)
+    accuracy = total_correct / max(1, total_valid)
+    
+    # Compute macro averages
+    precision_macro = np.mean(precision_list)
+    recall_macro = np.mean(recall_list)
+    f1_macro = np.mean(f1_list)
+    
+    # Compile results
+    per_class = {}
+    if include_per_class:
+        for i, (prec, rec, f1) in enumerate(zip(precision_list, recall_list, f1_list)):
+            c = classes[i] if classes is not None else i
+            if '(' in str(c):
+                c = Predicate(c).name
+            per_class[f'{prefix}class_{c}_precision'] = prec
+            per_class[f'{prefix}class_{c}_recall'] = rec
+            per_class[f'{prefix}class_{c}_f1'] = f1
+    metrics = {
+        f'{prefix}accuracy': accuracy,
+        f'{prefix}precision_micro': precision_micro,
+        f'{prefix}recall_micro': recall_micro,
+        f'{prefix}f1_micro': f1_micro,
+        f'{prefix}precision_macro': precision_macro,
+        f'{prefix}recall_macro': recall_macro,
+        f'{prefix}f1_macro': f1_macro,
+        **per_class,
+    }
+    
+    return metrics
+
+
+
+def plot_ml_cm(y_true, y_pred, labels, ncols=8, threshold=0.5, s=3, prefix=''):
     # Compute multilabel confusion matrix
     y_pred = (y_pred > threshold).astype(int)
     # mask = y_true == -1
@@ -291,6 +362,8 @@ def plot_ml_cm(y_true, y_pred, labels, ncols=8, threshold=0.5, s=3):
                 # print(labels[j], yti, ypi)
                 mcm[j, yti, ypi] += 1
     mcm = mcm.astype(float) / np.maximum(1, mcm.sum(-1, keepdims=True))
+
+    # return mcm
 
     # Plotting the confusion matrices for each label
     nrows = int(np.ceil(len(mcm)/ncols))
@@ -313,10 +386,12 @@ def plot_ml_cm(y_true, y_pred, labels, ncols=8, threshold=0.5, s=3):
         ax.set_title(f'{label}')
         ax.set_xticks([0, 1])
         ax.set_yticks([0, 1])
+    for ax in list(axes.flat)[len(labels):]:
+        ax.remove()
 
     # fig.colorbar(im, ax=axes.ravel().tolist())
     plt.tight_layout()
 
-    plt.savefig("confusion_matrix.png")
-    wandb.log({"confusion_matrix": wandb.Image("confusion_matrix.png")})
+    plt.savefig(f"{prefix}confusion_matrix.png")
+    wandb.log({f"{prefix}confusion_matrix": wandb.Image(f"{prefix}confusion_matrix.png")})
     plt.close()

@@ -1,0 +1,41 @@
+# Copyright (c) 2022, salesforce.com, inc.
+# All rights reserved.
+# SPDX-License-Identifier: BSD-3-Clause
+# For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+_BASE_: finetune_instructblip_s20bn_base.yaml
+datasets:
+  s20bn:
+    splits:
+      val:
+        
+      test: 
+        qa_prompt:
+          - describe_predicates
+          - action_before_after
+          - action_complete
+          - yes_no_predicate
+        # predicate_freq_balancing: False
+
+model:
+  arch: blip2_t5_instruct_qformer_lora_clsf
+  # qformer_num_classes: 2
+  qformer_cls_arch: dense
+
+run:
+  output_dir: "output/results/s20bn/s20bn_eval"
+  init_lr: 5e-4
+  # warmup_lr: 1e-5
+  # warmup_steps: 1000
+  batch_size_train: 64
+  train_splits: []
+  # valid_splits: []
+  # test_splits: ["test"]
+  batch_size_eval: 64
+  num_beams: 4
+  evaluate: True
+  eval_seed: 42
+
+  valid_splits: ['val', 'test']
+  test_splits: []
+  # evaluate: True
+  # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ

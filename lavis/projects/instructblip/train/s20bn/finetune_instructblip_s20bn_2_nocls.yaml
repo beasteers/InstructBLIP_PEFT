@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
 _BASE_: finetune_instructblip_s20bn_base.yaml
-# datasets:
-#   s20bn:
-#     splits:
-#       all: 
-#         downsample_count: 500
+datasets:
+  s20bn:
+    splits:
+      all:
+        include_detections: False
 
 model:
   arch: blip2_t5_instruct_qformer_lora_clsf
-  # qformer_num_classes: 2
+  qformer_num_classes: null
   qformer_cls_arch: dense
 
 run:
@@ -23,8 +23,3 @@ run:
   test_splits: []
   batch_size_eval: 64
   num_beams: 4
-
-  # valid_splits: ['val', 'test']
-  # evaluate: True
-  # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
-  resume_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ

@@ -2,6 +2,7 @@ import os
 import tqdm
 import random
 from lavis.common.predicate_utils.predicates import Predicate
+import h5py
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
@@ -11,11 +12,16 @@ import json
 import supervision as sv
 import cv2
 from PIL import Image
-from lavis.common.predicate_utils.masks import get_detections, draw_detections
+from lavis.common.predicate_utils.masks import get_detections, draw_detections, get_detections_h5
 from lavis.common.predicate_utils.prompts import get_prompt_function
 
 class VideoFrameDataset(Dataset):
-    def __init__(self, annotations, vis_root, vis_processor, classes, qa_prompt=None, include_detections=False, filename_format='{video_id}/frame_{i:010d}.jpg', n_frames=1):
+    def __init__(self, 
+                 annotations, vis_root, vis_processor, classes, h5_file=None,
+                 qa_prompt=None, include_detections=False, filename_format='{video_id}/frame_{i:010d}.jpg', 
+                 n_frames=1, boxes_only=False, included_object_class_ids=None, main_object_only=False,
+                 prompt_kw=None
+    ):
         super().__init__()
         self.vis_processor = vis_processor
         self.annotations = annotations
@@ -28,6 +34,10 @@ class VideoFrameDataset(Dataset):
         self.vis_root = vis_root
         self.filename_format = filename_format
         self.include_detections = include_detections
+        self.boxes_only = boxes_only
+        self.included_object_class_ids = included_object_class_ids
+        self.main_object_only = main_object_only
+        self.h5_file = h5py.File(h5_file, 'r', libver='latest') if self.include_detections and h5_file is not None else None
 
     def __len__(self):
         return len(self.annotations)
@@ -44,23 +54,41 @@ class VideoFrameDataset(Dataset):
             print(f"WARNING: no frames for {self._frame_name(video_id=ann['video_id'], i=1)} - {i} {ann['video_id']} {ann['start_frame']} {ann['stop_frame']}")
             return self.__getitem__((i + 1)%len(self))
 
+        # load detection frames
         detections = None
-        if self.include_detections:
-            # load detection frames
+        if self.include_detections and self.h5_file is None:
             detections = self.load_detections(ann)
 
-        if detections is not None:
+        if self.include_detections:
             # load frames
             frame_ids = list(files)
-            has_detection = np.array([i in detections for i in frame_ids])
-            frame_ids = self._sorted_sample(files, has_detection * 10 + 1)
-            frames = [Image.open(files[i]) for i in frame_ids]
+            if self.h5_file is not None:
+                frame_index = self.h5_file[ann['narration_id']]['frame_index'][()]
+                has_detection = np.array([i in frame_index for i in frame_ids])
+            else:
+                has_detection = np.array([i in detections for i in frame_ids])
+            # frame_ids = self._sorted_sample(files, has_detection * 10 + 1)
+            # frames = [Image.open(files[i]) for i in frame_ids]
+            frames, frame_ids = self._load_frames(files, frame_ids, has_detection * 10 + 1)
+            if self.h5_file is not None:
+                dets = get_detections_h5(self.h5_file, ann['narration_id'], frame_ids, frames[0])
+            else:
+                dets = [get_detections(detections.get(i, {}), x) for x, i in zip(frames, frame_ids)]
 
             # draw detection frames
-            dets = [get_detections(detections.get(i, {}), x) for x, i in zip(frames, frame_ids)]
+            included_object_class_ids = []
+            if self.included_object_class_ids is not None:
+                included_object_class_ids.extend(self.included_object_class_ids)
+            if self.main_object_only:
+                included_object_class_ids.extend(ann['all_noun_classes'])
+            if included_object_class_ids:
+                dets = [
+                    ds[np.isin(ds.class_id, included_object_class_ids)]
+                    for ds in dets
+                ]
             object_index = list({l for d in dets for l in d.data['labels']})
             det_frames = [
-                draw_detections(x, d, object_index) 
+                draw_detections(x, d, object_index, boxes_only=self.boxes_only) 
                 for x, i, d in zip(frames, frame_ids, dets)
             ]
             # interleave frames
@@ -76,8 +104,9 @@ class VideoFrameDataset(Dataset):
             #     fh.write(f'{prompt}\n\n{target}')
         else:
             # load frames
-            frame_ids = self._sorted_sample(files)
-            frames = [Image.open(files[i]) for i in frame_ids]
+            # frame_ids = self._sorted_sample(files)
+            # frames = [Image.open(files[i]) for i in frame_ids]
+            frames, frame_ids = self._load_frames(files)
 
             # load question answer
             prompt, target = self.get_prompt(ann, **self.prompt_kw)
@@ -105,8 +134,8 @@ class VideoFrameDataset(Dataset):
             # print(class_targets[class_targets!=-1])
             # input()
 
-        # video = torch.stack([self.vis_processor(x) for x in frames], dim=0)
-        video = self.vis_processor(frames[1])
+        video = torch.stack([self.vis_processor(x) for x in frames], dim=0)
+        # video = self.vis_processor(frames[1])
         return {
             # **ann,
             'image': video,
@@ -140,6 +169,37 @@ class VideoFrameDataset(Dataset):
                 replace=False,
                 p=weights)
         return sorted(frame_fnames)
+
+    def _load_frames(self, fs, frame_ids=None, weights=None):
+        if frame_ids is None:
+            frame_ids = list(fs)
+        n = len(fs) if self.n_frames == 'all' else self.n_frames
+        n = min(n or 1, len(fs))
+
+        if weights is not None:
+            weights = np.asarray(weights)
+            weights = weights / weights.sum()
+
+        samples = np.random.choice(frame_ids, len(frame_ids), replace=False, p=weights)
+        
+        frames = []
+        out_frame_ids = []
+        for fid in samples:
+            for _ in range(3):
+                try:
+                    frames.append(Image.open(fs[fid]))
+                    out_frame_ids.append(fid)
+                    break
+                except OSError:
+                    import time
+                    time.sleep(0.1)
+            if len(frames) == n:
+                break
+        
+        sort = np.argsort(out_frame_ids)
+        out_frame_ids = [out_frame_ids[i] for i in sort]
+        frames = [frames[i] for i in sort]
+        return frames, out_frame_ids
     
     def _frame_name(self, video_id, i):
         return os.path.join(self.vis_root, self.filename_format.format(video_id=video_id, i=i))

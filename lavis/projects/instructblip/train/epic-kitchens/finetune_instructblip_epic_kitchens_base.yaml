@@ -28,14 +28,19 @@ model:
   # qformer_crossattention_lora_k: False
   # qformer_crossattention_lora_v: False
   # qformer_crossattention_lora_o: False
-  qformer_num_classes: 60
+  qformer_num_classes: 46
   qformer_cls_arch: dense
 
 datasets:
   epic_kitchens:
     train_samples_portion: all
-    # splits:
-    #   all: 
+    splits:
+      all: 
+        qa_prompt:
+          - describe_predicates
+          - action_before_after
+          - action_complete
+          - yes_no_predicate
     #   train: 
     #   val: 
     #   test: 

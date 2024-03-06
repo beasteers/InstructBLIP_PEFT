@@ -6,19 +6,30 @@ import numpy as np
 
 '''
 
-- Object ID: what is object number 3?
-- Direct yes/no: is object 4 on a surface?
-- Affordances: What numbered object is openable?
-- Relational: What numbered objects are holding other numbered objects?
-- Negative attributes: What of the following predicates do not apply to the fridge?
-- Contrastive: What numbered objects are on a surface but not active?
-- Composite: What numbered objects are on a surface and active?
+- B: QA_describe_predicates: Correct Predicates: Which of the following predicates apply to the "fridge"? not open. not closed. is-openable.
+    - S: Negative attributes: What of the following predicates do not apply to the fridge?     # no seg
+- B: QA_action_before_after
+    - Implicit Pre-conditions: Based on this image, is it possible to execute the action 'opening the fridge' at this moment?
+    - Implicit Post-conditions: Based on this image, has "opening the fridge" been completed?
+- B: QA_action_complete: Action Completion: Based on this image, has "opening the jar" been COMPLETED?
+- S: QA_object_id: Object ID: what is object number 3?                                                   # segm (no-seg)
+- S: QA_main_object_id: Main Object ID: what is object number 3? (always main noun)                                 # segm (no-seg)
+- B*: QA_yes_no_predicate: Direct yes/no: is object 4 on a surface?                                              # seg
+- S*: QA_object_from_predicate: Affordances: What numbered object is openable?                                        # seg 
+    - S: Contrastive: What numbered objects are on a surface but not active?                   # seg
+    - S: Composite: What numbered objects are on a surface and active?                         # seg
 
+
+object_id
+main_object_id
+object_from_predicate
 '''
 
 def sample_states(states, freq, n=None):
-    weights = np.array([freq.get(k, 1) for k in states])
-    weights = weights / weights.sum()
+    weights = None
+    if freq is not None:
+        weights = np.array([freq.get(k, 1) for k in states])
+        weights = weights / weights.sum()
     n = min(n, len(states)) if n else None
     return np.random.choice(list(states), n, replace=False, p=weights)
 
@@ -141,13 +152,13 @@ def QA_action_before_after(ann, detection_labels=None, predicate_freq=None):
             f'Are the postconditions of the action "{narration}" satisfied?',
             f'Based on this image, was the last action performed "{narration}"?',
             f'Based on this image, has the action "{narration}" been performed?',
-            f"Does this image indicate that '{narration}' has already been carried out?"
-            f"In light of this image, can we deduce that the action '{narration}' has concluded?"
-            f"Has the action '{narration}' reached completion?"
-            f"Reflecting on my actions, have I successfully executed '{narration}'?"
-            f"Do the outcomes evident in this image fulfill the action '{narration}'s postconditions?"
-            f"From the evidence presented, was '{narration}' the preceding action?"
-            f"Does this visual suggest that the action '{narration}' has been accomplished?"
+            f"Does this image indicate that '{narration}' has already been carried out?",
+            f"In light of this image, can we deduce that the action '{narration}' has concluded?",
+            f"Has the action '{narration}' reached completion?",
+            f"Reflecting on my actions, have I successfully executed '{narration}'?",
+            f"Do the outcomes evident in this image fulfill the action '{narration}'s postconditions?",
+            f"From the evidence presented, was '{narration}' the preceding action?",
+            f"Does this visual suggest that the action '{narration}' has been accomplished?",
         ])
     text_input = f'{text_input} Answer: '
 

@@ -28,8 +28,48 @@ model:
   # qformer_crossattention_lora_k: False
   # qformer_crossattention_lora_v: False
   # qformer_crossattention_lora_o: False
+  qformer_cls_arch: dense
   qformer_num_classes: 37
   # qformer_video_input: True
+
+  qformer_cls_labels:
+  - (above ?a ?b)
+  - (attached ?a ?b)
+  - (behind ?a ?b)
+  - (broken ?a)
+  - (close ?a)
+  - (closed ?a)
+  - (deformed ?a)
+  - (empty ?a)
+  - (far ?a)
+  - (fits ?a ?b)
+  - (folded ?a)
+  - (full ?a)
+  - (has-hole ?a)
+  - (high ?a)
+  - (in ?a ?b)
+  - (infront ?a ?b)
+  - (is-bendable ?a)
+  - (is-fluid ?a)
+  - (is-holdable ?a)
+  - (is-rigid ?a)
+  - (is-spreadable ?a)
+  - (is-tearable ?a)
+  - (left ?a)
+  - (low ?a)
+  - (nextto ?a ?b)
+  - (on ?a ?b)
+  - (onsurface ?a)
+  - (open ?a)
+  - (right ?a)
+  - (stacked ?a)
+  - (stretched ?a)
+  - (torn ?a)
+  - (touching ?a ?b)
+  - (twisted ?a)
+  - (under ?a ?b)
+  - (upright ?a)
+  - (visible ?a)
 
 
 datasets:
@@ -39,6 +79,11 @@ datasets:
       all:
         inner_buffer: 2
         include_detections: True
+        qa_prompt:
+          - describe_predicates
+          - action_before_after
+          - action_complete
+          - yes_no_predicate
     #   train: 
     #   val: 
     #   test: 
@@ -89,7 +134,7 @@ run:
   train_splits: ["train"]
   valid_splits: ["val"]
   test_splits: ["test"]
-  disable_early_stopping: true
+  # disable_early_stopping: true
 
   device: "cuda"
   world_size: 1

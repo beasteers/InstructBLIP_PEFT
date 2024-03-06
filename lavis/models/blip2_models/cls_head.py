@@ -23,7 +23,7 @@ class _ScaleGradient(Function):
 
 
 class TFQFormerClassHead(nn.Module):
-    def __init__(self, input_size, n_classes, num_heads=32, num_encoder_layers=1, seq_len=32, hidden_act='gelu'):
+    def __init__(self, input_size, n_classes, num_heads=16, num_encoder_layers=1, seq_len=32, hidden_act='gelu'):
         super().__init__()
         self.cls_token = nn.Parameter(torch.randn(1, 1, input_size) * 0.02)
         # # self.cls_token = torch.randn(1, 1, input_size).cuda()
@@ -129,9 +129,9 @@ class MHAQFormerClassHead(nn.Module):
 
     def forward(self, tokens, targets=None):
         x = tokens
-        # cls_tokens = self.cls_token.expand(x.size(0), -1, -1)
-        # cls_tokens = x.mean(1, keepdims=1)
-        # x = torch.cat((cls_tokens, x), dim=1)
+        cls_tokens = self.cls_token.expand(x.size(0), -1, -1)
+        cls_tokens = x.mean(1, keepdims=1)
+        x = torch.cat((cls_tokens, x), dim=1)
         
         # Add positional encodings
         x += self.pos_encoder[:, :x.size(1), :]
@@ -180,6 +180,7 @@ class DenseQFormerClassHead(nn.Module):
         return {
             'loss': loss,
             'prediction': y,
+            'logits': logits,
         }
 
 

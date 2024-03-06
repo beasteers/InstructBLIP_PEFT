@@ -7,13 +7,18 @@ datasets:
   epic_kitchens:
     splits:
       all:
-        n_frames: 3
         include_detections: True
+        boxes_only: True
+        main_object_only: True
+        included_object_class_ids:
+         - 11
+         - 300
+         - 301
+         - 303
+         - 304
 
 run:
-  output_dir: "output/results/epic_kitchens/epic_kitchens_4"
+  output_dir: "output/results/epic_kitchens/epic_kitchens_3"
   batch_size_train: 64
   batch_size_eval: 64
   num_beams: 4
-
-  # resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_4/20240304190/checkpoint_best.pth

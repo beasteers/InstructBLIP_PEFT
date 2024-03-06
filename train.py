@@ -84,7 +84,11 @@ def main():
 
     args = parse_args()
     cfg = Config(args)
-    wandb.init(config=OmegaConf.to_container(cfg.config, resolve=True), project='epic-kitchens-grounded')
+    tags = sorted({
+        *(cfg.config.get('tags') or []),
+        *(cfg.config.get('datasets') or {}),
+    })
+    run = wandb.init(config=OmegaConf.to_container(cfg.config, resolve=True), project='epic-kitchens-grounded', tags=tags)
 
     init_distributed_mode(cfg.run_cfg)
 

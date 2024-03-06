@@ -1,5 +1,6 @@
 import os
 import json
+import orjson
 import numpy as np
 import supervision as sv
 import cv2
@@ -44,6 +45,27 @@ def get_detections(frame_data, frame, scale=None):
     )
     return detections
 
+
+def get_detections_h5(group, narration_id, frame_ids, frame, scale=None):
+    g = group[narration_id]
+
+    detections = []
+    for fid in frame_ids:
+        idxs = np.where(g['frame_index'][()] == fid)[0]
+        detections.append(get_detections({
+            'annotations': [
+                {
+                    'segments': orjson.loads(g['segments'][i]),
+                    'name': g['names'][i].decode(),
+                    'class_id': int(g['class_ids'][i]),
+                    'track_id': int(g['track_ids'][i]),
+                    'confidence': float(g['confidences'][i]),
+                } for i in idxs
+            ]
+        }, frame, scale))
+    return detections
+
+
 TARGET = np.array([456, 256])
 VISOR_SCALE = np.array([854, 480])
 SCALE = list(VISOR_SCALE / TARGET)
@@ -81,12 +103,12 @@ ma = sv.MaskAnnotator()
 # ba = sv.BoxCornerAnnotator()
 ba = sv.BoundingBoxAnnotator(thickness=1)
 la = sv.LabelAnnotator(text_position=sv.Position.CENTER, text_scale=0.45, text_padding=2)
-def draw_detections(image, detections, det_index):
+def draw_detections(image, detections, det_index, boxes_only=False):
     labels = detections.data['labels']
     color_lookup = np.array([det_index.index(labels[i]) for i in range(len(detections))])
     image = np.array(image)[:, :, ::-1]
     image = image.copy()
-    is_ma = detections.mask.any((1,2)) if detections.mask is not None else np.zeros(len(detections), dtype=bool)
+    is_ma = detections.mask.any((1,2)) if detections.mask is not None and not boxes_only else np.zeros(len(detections), dtype=bool)
     is_ba = ~is_ma & detections.xyxy.any(1)
     image = ma.annotate(scene=image, detections=detections[is_ma], custom_color_lookup=color_lookup[is_ma])
     image = ba.annotate(scene=image, detections=detections[is_ba], custom_color_lookup=color_lookup[is_ba])

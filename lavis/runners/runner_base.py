@@ -39,6 +39,21 @@ from torch.utils.data.dataset import ChainDataset
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
+def set_seed(seed):
+    import random
+    import numpy as np
+    import torch
+    import torch.backends.cudnn as cudnn
+    seed = seed + get_rank()
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    cudnn.benchmark = False
+    cudnn.deterministic = True
+
+
 @registry.register_runner("runner_base")
 class RunnerBase:
     """
@@ -65,6 +80,7 @@ class RunnerBase:
         self._lr_sched = None
 
         self.start_epoch = 0
+        self.eval_seed = self.config.run_cfg.get('eval_seed', None)
 
         # self.setup_seeds()
         self.setup_output_dir()
@@ -358,6 +374,23 @@ class RunnerBase:
         self.result_dir = result_dir
         self.output_dir = output_dir
 
+    def load_checkpoint_from_config(self):
+        # resume from checkpoint if specified
+        eval_ckpt_path = self.config.run_cfg.get("eval_ckpt_path")
+        if not self.evaluate_only and self.resume_ckpt_path is not None:
+            self._load_checkpoint(self.resume_ckpt_path)
+        # elif self.evaluate_only and eval_ckpt_path:
+        #     self._load_checkpoint(eval_ckpt_path)
+        elif self.evaluate_only and eval_ckpt_path is not None:
+            print(f"""
+========================================================================
+LOADING {eval_ckpt_path}
+========================================================================
+            
+            """)
+            self._load_model(eval_ckpt_path)
+
+
     def train(self):
         start_time = time.time()
         best_agg_metric = 0
@@ -366,10 +399,8 @@ class RunnerBase:
         self.log_config()
         wandb.watch(self.model, log_freq=100)
 
-        # resume from checkpoint if specified
-        if not self.evaluate_only and self.resume_ckpt_path is not None:
-            self._load_checkpoint(self.resume_ckpt_path)
-
+        self.load_checkpoint_from_config()
+        # if input('>?'):from IPython import embed;embed()
         # if len(self.valid_splits) > 0:
                     
         #     for split_name in self.valid_splits:
@@ -510,6 +541,8 @@ class RunnerBase:
         """
         data_loader = self.dataloaders.get(split_name, None)
         assert data_loader, "data_loader for split {} is None.".format(split_name)
+        # if self.eval_seed is not None:
+        #     set_seed(self.eval_seed)
 
         # TODO In validation, you need to compute loss as well as metrics
         # TODO consider moving to model.before_evaluation()
@@ -523,6 +556,8 @@ class RunnerBase:
             dataset=self.datasets[split_name],
         )
         results = self.task.evaluation(model, data_loader)
+        set_seed(9999999)
+        self.samples = next(iter(data_loader))
 
         if results is not None:
             return self.task.after_evaluation(
@@ -644,27 +679,62 @@ class RunnerBase:
             self.output_dir,
             "checkpoint_{}.pth".format("best" if is_best else cur_epoch),
         )
+        output_signature = os.path.join(
+            self.output_dir,
+            "checkpoint_{}_sample_output.pth".format("best" if is_best else cur_epoch),
+        )
+        torch.save(self._generate_model_hash(model_no_ddp, self.samples), output_signature)
+
         logging.info("Saving checkpoint at epoch {} to {}.".format(cur_epoch, save_to))
         torch.save(save_obj, save_to)
+        self._validate_outputs(model_no_ddp, save_to)
+
+    def _generate_model_hash(self, model, samples):
+        model.eval()
+        answer_pred = model.generate(
+            samples,
+            use_nucleus_sampling=False,
+            num_beams=4,
+            max_length=30,
+            min_length=1,
+        )
+        cls_pred = model.class_head(samples)
+        return {
+            'samples': samples,
+            'outputs': {
+                'answer_pred': answer_pred,
+                'cls_pred': cls_pred,
+            }
+        }
+
+    def _validate_outputs(self, model, checkpoint_path):
+        sample_path = '{}_sample_output.pth'.format(checkpoint_path.rsplit('.',1)[0])
+        if not os.path.isfile(sample_path):
+            logging.warning(f"Checkpoint output validation data does not exist - {sample_path}")
+            return
+
+        data = torch.load(sample_path)
+        out = self._generate_model_hash(model, data['samples'])
+        assert torch.allclose(out['outputs']['cls_pred'], data['outputs']['cls_pred'])
+        assert out['outputs']['answer_pred'] == data['outputs']['answer_pred']
 
     def _reload_best_model(self, model):
         """
         Load the best checkpoint for evaluation.
         """
         checkpoint_path = os.path.join(self.output_dir, "checkpoint_best.pth")
+        return self._load_model(checkpoint_path)
 
+    def _load_model(self, checkpoint_path):
         logging.info("Loading checkpoint from {}.".format(checkpoint_path))
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        model= self.unwrap_dist_model(self.model)
         try:
             model.load_state_dict(checkpoint["model"])
         except RuntimeError as e:
-            logging.warning(
-                """
-                Key mismatch when loading checkpoint. This is expected if only part of the model is saved.
-                Trying to load the model with strict=False.
-                """
-            )
+            logging.warning(str(e))
             model.load_state_dict(checkpoint["model"], strict=False)
+        self._validate_outputs(model, checkpoint_path)
         return model
 
     def _load_checkpoint(self, url_or_filename):
@@ -681,8 +751,17 @@ class RunnerBase:
         else:
             raise RuntimeError("checkpoint url or path is invalid")
 
-        state_dict = checkpoint["model"]
-        self.unwrap_dist_model(self.model).load_state_dict(state_dict)
+        m = self.unwrap_dist_model(self.model)
+        try:
+            m.load_state_dict(checkpoint["model"])
+        except RuntimeError as e:
+            logging.warning(
+                """
+                Key mismatch when loading checkpoint. This is expected if only part of the model is saved.
+                Trying to load the model with strict=False.
+                """
+            )
+            m.load_state_dict(checkpoint["model"], strict=False)
 
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         if self.scaler and "scaler" in checkpoint:
@@ -693,6 +772,7 @@ class RunnerBase:
 
     @main_process
     def log_stats(self, stats, split_name):
+        print("LOGGING STATS", split_name, type(stats))
         if isinstance(stats, dict):
             log_stats = {**{f"{split_name}_{k}": v for k, v in stats.items()}}
             with open(os.path.join(self.output_dir, "log.txt"), "a") as f:
