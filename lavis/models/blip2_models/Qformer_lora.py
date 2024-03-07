@@ -677,6 +677,22 @@ def lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled: bool = True,
     if not enabled and True not in qkv:
         yield
         return
+    print("""
+
+LORA
+    
+    """)
+    print("""
+
+NOOOOOO
+    
+    """)
+    print("""
+
+NOOOOOOOOOOO. BAD
+    
+    """)
+    return
 
     BertSelfAttention.lora_config = LoRAConfig(r=r, alpha=alpha, dropout=dropout)
     BertSelfAttention.qkv = qkv
@@ -716,6 +732,11 @@ def custom_lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled: bool 
     if not enabled:
         yield
         return
+    print("""
+
+CUSTOM LORA
+    
+    """)
     
     if type == "BertSelfOutput":
         BertSelfOutput.lora_config = LoRAConfig(r=r, alpha=alpha, dropout=dropout)

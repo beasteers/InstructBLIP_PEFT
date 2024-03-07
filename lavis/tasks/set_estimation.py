@@ -80,6 +80,7 @@ class EpicKitchensTask(BaseTask):
                 cls_pred = None
 
         for i in range(len(answer_pred)):
+            print(samples["narration_id"][i])
             r = {
                 "question": samples["text_input"][i],
                 "answer_pred": answer_pred[i], 
@@ -272,7 +273,7 @@ def convert_text_to_manyhot(txt_true, txt_pred):
     return y_true, y_pred, labels
 
 
-def compute_metrics_with_partial_ground_truth(y_true, y_pred_logits, threshold=0.5, include_per_class=True, classes=None, prefix=''):
+def compute_metrics_with_partial_ground_truth(y_true, y_pred_logits, threshold=0.5, include_per_class=False, classes=None, prefix=''):
     # Convert logits to binary predictions based on threshold
     y_pred = (y_pred_logits > threshold).astype(int)
     

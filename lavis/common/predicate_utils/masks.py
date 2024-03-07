@@ -99,7 +99,8 @@ def seg2mask(segments, shape, scale=None):
 
 
 
-ma = sv.MaskAnnotator()
+ma = sv.MaskAnnotator(opacity=0.4)
+# pa = sv.PolygonAnnotator()
 # ba = sv.BoxCornerAnnotator()
 ba = sv.BoundingBoxAnnotator(thickness=1)
 la = sv.LabelAnnotator(text_position=sv.Position.CENTER, text_scale=0.45, text_padding=2)

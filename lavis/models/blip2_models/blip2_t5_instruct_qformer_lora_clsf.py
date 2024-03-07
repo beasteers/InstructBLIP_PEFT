@@ -63,6 +63,7 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
         qformer_text_input=True,
         qformer_num_classes=None,
         qformer_cls_arch=None,
+        qformer_lora_enabled=True,
         qformer_cls_loss_weight=1,
     ):
         """
@@ -97,9 +98,22 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
         self.Qformer.cls = None
         # Train only the Qformer LoRA
         
-        mark_only_lora_as_trainable(self.Qformer)
-        
-        check_lora_application(self.Qformer)
+        if qformer_lora_enabled:
+            mark_only_lora_as_trainable(self.Qformer)
+            
+            check_lora_application(self.Qformer)
+            print("""
+    
+LORA ENABLED
+
+            """)
+
+        else:
+            print("""
+    
+LORA DISABLED
+
+            """)
         
         num_params = sum([p.numel() for p in self.Qformer.parameters() if p.requires_grad])
         print(f"Number of trainable parameters in Qformer: {num_params}")
@@ -244,6 +258,40 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
                 image_embeds = self.ln_vision(self.visual_encoder(image))
         image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(image.device)
         return image_embeds, image_atts
+
+    def _encode_qformer(self, image_embeds, image_atts, text_input):
+        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
+        if self.qformer_text_input:
+            text_Qformer = self._encode_text(text_input).to(image_embeds.device)
+            query_atts = torch.ones(query_tokens.size()[:-1], dtype=torch.long).to(image_atts.device)
+            Qformer_atts = torch.cat([query_atts,text_Qformer.attention_mask],dim=1)
+
+            query_output = self.Qformer.bert(
+                text_Qformer.input_ids,
+                attention_mask=Qformer_atts,
+                query_embeds=query_tokens,
+                encoder_hidden_states=image_embeds,
+                encoder_attention_mask=image_atts,
+                return_dict=True,
+            )
+        else:
+            query_output = self.Qformer.bert(
+                query_embeds=query_tokens,
+                encoder_hidden_states=image_embeds,
+                encoder_attention_mask=image_atts,
+                return_dict=True,
+            )
+        return query_output, text_Qformer
+
+    def _encode_text(self, text_input):
+        text_Qformer = self.tokenizer(
+            text_input,
+            padding='longest',
+            truncation=True,
+            max_length=self.max_txt_len,
+            return_tensors="pt",
+        )
+        return text_Qformer
 
     def prepare_few_shot_embeds(self, samples):
         this_n_fs = random.choices(
@@ -847,17 +895,19 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
         alpha = cfg.get("lora_alpha", 16)
         dropout = cfg.get("lora_dropout", 0.05)
         
-        # qformer_lora_enabled = True #cfg.get("qformer_lora_enabled", True)
-        self_attention_qv_lora = cfg.get("self_attention_qv_lora", False) # and qformer_lora_enabled
-        self_attention_output_lora = cfg.get("self_attention_output_lora", False) # and qformer_lora_enabled
-        ffn_lora = cfg.get("ffn_lora", False) # and qformer_lora_enabled
+        qformer_lora_enabled = False #cfg.get("qformer_lora_enabled", True)
+        self_attention_qv_lora = cfg.get("self_attention_qv_lora", False) and qformer_lora_enabled
+        self_attention_output_lora = cfg.get("self_attention_output_lora", False) and qformer_lora_enabled
+        ffn_lora = cfg.get("ffn_lora", False) and qformer_lora_enabled
         
-        qformer_crossattention_lora_q = cfg.get("qformer_crossattention_lora_q", False) # and qformer_lora_enabled
-        qformer_crossattention_lora_k = cfg.get("qformer_crossattention_lora_k", False) # and qformer_lora_enabled
-        qformer_crossattention_lora_v = cfg.get("qformer_crossattention_lora_v", False) # and qformer_lora_enabled
-        qformer_crossattention_lora_o = cfg.get("qformer_crossattention_lora_o", False) # and qformer_lora_enabled
+        qformer_crossattention_lora_q = cfg.get("qformer_crossattention_lora_q", False) and qformer_lora_enabled
+        qformer_crossattention_lora_k = cfg.get("qformer_crossattention_lora_k", False) and qformer_lora_enabled
+        qformer_crossattention_lora_v = cfg.get("qformer_crossattention_lora_v", False) and qformer_lora_enabled
+        qformer_crossattention_lora_o = cfg.get("qformer_crossattention_lora_o", False) and qformer_lora_enabled
 
-        with lora(r, alpha, dropout, enabled=self_attention_qv_lora, qkv=[qformer_crossattention_lora_q, qformer_crossattention_lora_k, qformer_crossattention_lora_v]), custom_lora(r, alpha, dropout, enabled=(self_attention_output_lora or qformer_crossattention_lora_o), type="BertSelfOutput", sc=[self_attention_output_lora, qformer_crossattention_lora_o]), custom_lora(r, alpha, dropout, enabled=ffn_lora, type="BertOutput"):
+        with lora(r, alpha, dropout, enabled=self_attention_qv_lora, qkv=[qformer_crossattention_lora_q, qformer_crossattention_lora_k, qformer_crossattention_lora_v]), \
+             custom_lora(r, alpha, dropout, enabled=(self_attention_output_lora or qformer_crossattention_lora_o), type="BertSelfOutput", sc=[self_attention_output_lora, qformer_crossattention_lora_o]), \
+             custom_lora(r, alpha, dropout, enabled=ffn_lora, type="BertOutput"):
             model = cls(
                 vit_model=vit_model,
                 img_size=img_size,
@@ -865,6 +915,7 @@ class Blip2T5InstructQformerLoRAClsf(Blip2Base):
                 use_grad_checkpoint=use_grad_checkpoint,
                 vit_precision=vit_precision,
                 freeze_vit=freeze_vit,
+                qformer_lora_enabled=qformer_lora_enabled,
                 num_query_token=num_query_token,
                 t5_model=t5_model,
                 prompt=prompt,

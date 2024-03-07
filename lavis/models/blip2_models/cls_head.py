@@ -167,6 +167,7 @@ class DenseQFormerClassHead(nn.Module):
         # x = self.fn1(x)
         # x = self.act(x)
         x = x.mean(1)
+        # x = x[:, 0]
         logits = self.fn2(x)
 
         loss = 0

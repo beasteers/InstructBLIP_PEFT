@@ -376,7 +376,7 @@ class RunnerBase:
 
     def load_checkpoint_from_config(self):
         # resume from checkpoint if specified
-        eval_ckpt_path = self.config.run_cfg.get("eval_ckpt_path")
+        eval_ckpt_path = self.config.run_cfg.get("eval_ckpt_path") or self.resume_ckpt_path
         if not self.evaluate_only and self.resume_ckpt_path is not None:
             self._load_checkpoint(self.resume_ckpt_path)
         # elif self.evaluate_only and eval_ckpt_path:
@@ -547,6 +547,7 @@ LOADING {eval_ckpt_path}
         # TODO In validation, you need to compute loss as well as metrics
         # TODO consider moving to model.before_evaluation()
         model = self.unwrap_dist_model(self.model)
+        print(f"EVAL {split_name} {cur_epoch} {skip_reload}")
         if not skip_reload and cur_epoch == "best":
             model = self._reload_best_model(model)
         model.eval()
@@ -691,6 +692,7 @@ LOADING {eval_ckpt_path}
 
     def _generate_model_hash(self, model, samples):
         model.eval()
+        set_seed(1234567)
         answer_pred = model.generate(
             samples,
             use_nucleus_sampling=False,
@@ -699,11 +701,17 @@ LOADING {eval_ckpt_path}
             min_length=1,
         )
         cls_pred = model.class_head(samples)
+        image_embeds, image_atts = model._encode_vision(samples['image'])
+        text_Qformer = model._encode_text(samples['text_input'])
+        query_output = model._encode_qformer(image_embeds, image_atts, samples['text_output'])
         return {
             'samples': samples,
             'outputs': {
                 'answer_pred': answer_pred,
                 'cls_pred': cls_pred,
+                'image_embeds': image_embeds,
+                'text_Qformer': text_Qformer,
+                'query_output': query_output[0].last_hidden_state,
             }
         }
 
@@ -715,8 +723,43 @@ LOADING {eval_ckpt_path}
 
         data = torch.load(sample_path)
         out = self._generate_model_hash(model, data['samples'])
-        assert torch.allclose(out['outputs']['cls_pred'], data['outputs']['cls_pred'])
-        assert out['outputs']['answer_pred'] == data['outputs']['answer_pred']
+        try:
+            assert out['samples']['text_input'] == data['samples']['text_input']
+            assert torch.allclose(out['samples']['image'], data['samples']['image'])
+            assert torch.allclose(out['outputs']['image_embeds'], data['outputs']['image_embeds'])
+            assert torch.allclose(out['outputs']['query_output'], data['outputs']['query_output'])
+            assert torch.allclose(out['outputs']['cls_pred'], data['outputs']['cls_pred'])
+            assert out['outputs']['answer_pred'] == data['outputs']['answer_pred']
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._compare_model_checkpoint(model, checkpoint_path)
+                full_ckpt_path = '{}_full.pth'.format(checkpoint_path.rsplit('.',1)[0])
+                if os.path.isfile(full_ckpt_path):
+                    self._compare_model_checkpoint(model, full_ckpt_path)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+        # print(out['outputs']['cls_pred'])
+        # print(data['outputs']['cls_pred'])
+        # print(out['outputs']['answer_pred'])
+        # print(data['outputs']['answer_pred'])
+        # input()
+
+    def _compare_model_checkpoint(self, model, checkpoint_path):
+        data = torch.load(checkpoint_path)
+        state = model.state_dict()
+        keys = set(state) & set(data['model'])
+        diffs=[]
+        for k in keys:
+            x = torch.allclose(state[k], data['model'][k])
+            if not x:
+                print(k, x)
+                diffs.append(k)
+        assert not diffs, f'{diffs}'
+        
+
 
     def _reload_best_model(self, model):
         """

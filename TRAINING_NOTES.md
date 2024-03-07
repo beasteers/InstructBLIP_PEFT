@@ -1,5 +1,66 @@
 
 
+Batch 1: Train
+
+```bash
+
+# 3 frame
+# bs 5 | 6 | 7
+# python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4_ho_masks.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4_ho_boxes.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_2.yaml
+# python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_2_nocls.yaml
+
+# 1 frame
+# bs 0 | 1, ir 1
+# python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_3.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_3_ho_masks.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_3_ho_boxes.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_1.yaml
+# python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_2_nocls.yaml
+
+# SSv2
+# ir 6
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/s20bn/finetune_instructblip_s20bn_1.yaml
+```
+
+Batch 2: Eval
+```bash
+# 
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4_ho_boxes.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_2.yaml
+
+# 
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4_ho_boxes.yaml
+python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_2.yaml
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
  - lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_1.yaml
 
