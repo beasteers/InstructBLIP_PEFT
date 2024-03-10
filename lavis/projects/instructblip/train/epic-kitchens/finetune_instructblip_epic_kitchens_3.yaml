@@ -16,4 +16,4 @@ run:
   num_beams: 4
   # seed: 43
 
-  # resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_3/20240304184/checkpoint_best.pth
+  resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_3/20240304184/checkpoint_best.pth

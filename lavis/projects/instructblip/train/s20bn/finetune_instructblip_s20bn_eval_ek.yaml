@@ -10,9 +10,9 @@ datasets:
     splits:
       test: 
         qa_prompt:
-          # - describe_predicates
-          # - action_before_after
-          # - action_complete
+          - describe_predicates
+          - action_before_after
+          - action_complete
           - yes_no_predicate
         predicate_freq_balancing: False
     vis_processor:
@@ -30,7 +30,7 @@ datasets:
 
 model:
   arch: blip2_t5_instruct_qformer_lora_clsf
-  # qformer_num_classes: 2
+  qformer_num_classes: null
   qformer_cls_arch: dense
 
 run:
@@ -43,8 +43,12 @@ run:
   valid_splits: []
   test_splits: ["test"]
   batch_size_eval: 64
-  num_beams: 4
+  # num_beams: 4
+  num_beams: 2
+  max_len: 5
   evaluate: True
   eval_seed: 42
 
-  eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
+  # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
+  # resume_ckpt_path: output/results/s20bn/s20bn_1_sm/20240307072/checkpoint_best.pth
+  resume_ckpt_path: output/results/s20bn/s20bn_1_sm/20240307080/checkpoint_best.pth

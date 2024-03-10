@@ -16,4 +16,5 @@ run:
   batch_size_eval: 64
   num_beams: 4
 
+  resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_4/20240306020/checkpoint_best.pth
   # resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_4/20240304190/checkpoint_best.pth

@@ -4,6 +4,35 @@ Batch 1: Train
 
 ```bash
 
+
+# ir
+# 0 emp
+# 1 nj
+# 2 oj
+# 3 WAI
+# 4 WAI
+# 5 WAI
+# 6 nj
+# 7 oj
+# 8 oj
+# 9 WAI
+# 10 WAI
+# 11 WAI
+
+# bs
+# 0 nj
+# 1 nj
+# 2 WAI
+# 3 WAI
+# 4 WAI
+# 5 j
+# 6 j
+# 7 j
+# 8 j
+# 9 WAI
+# 10 emp
+
+
 # 3 frame
 # bs 5 | 6 | 7
 # python -m torch.distributed.run --nproc_per_node=1 --master_port=25678 train.py --cfg-path lavis/projects/instructblip/train/epic-kitchens/finetune_instructblip_epic_kitchens_4.yaml

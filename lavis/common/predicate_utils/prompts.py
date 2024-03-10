@@ -74,10 +74,10 @@ def QA_describe_predicates(ann, detection_labels=None, predicate_freq=None):
 
     text_input = random.choice([
         f'Based on the image, which of the following predicates apply to the "{noun}"? {state_list}',
-        # f'Which of the following predicates apply to the "{noun}"? {state_list}',
-        # f'Which of the following predicates describe the "{noun}"? {state_list}',
-        # f'Which of the following apply to the "{noun}"? {state_list}',
-        # f'Which of the following describe the "{noun}"? {state_list}',
+        f'Which of the following predicates apply to the "{noun}"? {state_list}',
+        f'Which of the following predicates describe the "{noun}"? {state_list}',
+        f'Which of the following apply to the "{noun}"? {state_list}',
+        f'Which of the following describe the "{noun}"? {state_list}',
     ])
     text_input = f'{objs}{text_input} Answer: '
     

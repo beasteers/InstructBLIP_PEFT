@@ -10,9 +10,13 @@ datasets:
       #   h5_file: /scratch/bs3639/SSv2_train.h5
       val:
         downsample_count: 2000
-      #   h5_file: /scratch/bs3639/SSv2_val.h5
-      # test:
-      #   h5_file: /scratch/bs3639/SSv2_val.h5
+        # /scratch/work/ptg/Something_ek_labels/test_video_ids.csv
+        # h5_file: /scratch/bs3639/SSv2_val.h5
+      #   exclude_video_ids: ../epic-kitchens-100-annotations/EPIC_test_video_ids.csv # XXX: fixme
+      test:
+        downsample_count: 16000
+      #   # h5_file: /scratch/bs3639/SSv2_val.h5
+      #   include_video_ids: ../epic-kitchens-100-annotations/EPIC_test_video_ids.csv # XXX: fixme
     build_info:
       # Be careful not to append minus sign (-) before split to avoid itemizing
       annotations:

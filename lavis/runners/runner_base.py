@@ -78,6 +78,7 @@ class RunnerBase:
         self._scaler = None
         self._dataloaders = None
         self._lr_sched = None
+        self._samples = None
 
         self.start_epoch = 0
         self.eval_seed = self.config.run_cfg.get('eval_seed', None)
@@ -342,7 +343,7 @@ class RunnerBase:
 
     @property
     def resume_ckpt_path(self):
-        return self.config.run_cfg.get("resume_ckpt_path", None)
+        return self.config.run_cfg.get("resume_ckpt_path", None) or self.config.run_cfg.get("eval_ckpt_path", None)
 
     @property
     def train_loader(self):
@@ -376,54 +377,25 @@ class RunnerBase:
 
     def load_checkpoint_from_config(self):
         # resume from checkpoint if specified
-        eval_ckpt_path = self.config.run_cfg.get("eval_ckpt_path") or self.resume_ckpt_path
-        if not self.evaluate_only and self.resume_ckpt_path is not None:
-            self._load_checkpoint(self.resume_ckpt_path)
-        # elif self.evaluate_only and eval_ckpt_path:
-        #     self._load_checkpoint(eval_ckpt_path)
-        elif self.evaluate_only and eval_ckpt_path is not None:
+        if self.resume_ckpt_path is not None:
             print(f"""
 ========================================================================
-LOADING {eval_ckpt_path}
+LOADING {self.resume_ckpt_path}
 ========================================================================
-            
             """)
-            self._load_model(eval_ckpt_path)
-
+            self._load_checkpoint(self.resume_ckpt_path)
 
     def train(self):
         start_time = time.time()
         best_agg_metric = 0
         best_epoch = 0
 
+        self.model.train()
+
         self.log_config()
         wandb.watch(self.model, log_freq=100)
 
-        self.load_checkpoint_from_config()
-        # if input('>?'):from IPython import embed;embed()
-        # if len(self.valid_splits) > 0:
-                    
-        #     for split_name in self.valid_splits:
-        #         logging.info("INIT Evaluating on {}.".format(split_name))
-
-        #         val_log = self.eval_epoch(
-        #             split_name=split_name, cur_epoch=-1
-        #         )
-        #         if val_log is not None:
-        #             if is_main_process():
-        #                 assert (
-        #                     "agg_metrics" in val_log
-        #                 ), "No agg_metrics found in validation log."
-
-        #                 agg_metrics = val_log["agg_metrics"]
-        #                 if agg_metrics > best_agg_metric and split_name == "val":
-        #                     best_epoch, best_agg_metric = -1, agg_metrics
-
-        #                     self._save_checkpoint(-1, is_best=True)
-
-        #                 val_log.update({"best_epoch": best_epoch})
-        #                 self.log_stats(val_log, split_name)    
-                                    
+        self.load_checkpoint_from_config()   
         count_for_early_stopping = 0   
         early_stopping_patience = 3 
         disable_early_stopping = self.config.run_cfg.get("disable_early_stopping", False)
@@ -469,10 +441,12 @@ LOADING {eval_ckpt_path}
                             if agg_metrics > best_agg_metric and split_name == "val":
                                 count_for_early_stopping = 0 
                                 best_epoch, best_agg_metric = cur_epoch, agg_metrics
+                                logging.info(f"Best epoch {best_epoch} {agg_metrics} > {best_agg_metric}")
 
                                 self._save_checkpoint(cur_epoch, is_best=True)
                             else:
                                 count_for_early_stopping += 1 
+                                logging.info(f"Early stopping(enabled={not disable_early_stopping}) {count_for_early_stopping}/{early_stopping_patience}")
                             val_log.update({"best_epoch": best_epoch})
                             self.log_stats(val_log, split_name)
 
@@ -557,8 +531,8 @@ LOADING {eval_ckpt_path}
             dataset=self.datasets[split_name],
         )
         results = self.task.evaluation(model, data_loader)
-        set_seed(9999999)
-        self.samples = next(iter(data_loader))
+        # set_seed(9999999)
+        # self._samples = next(iter(data_loader))
 
         if results is not None:
             return self.task.after_evaluation(
@@ -660,6 +634,8 @@ LOADING {eval_ckpt_path}
         Save the checkpoint at the current epoch.
         """
         model_no_ddp = self.unwrap_dist_model(self.model)
+        # prev_mode = model_no_ddp.training
+        # model_no_ddp.train()
         param_grad_dic = {
             k: v.requires_grad for (k, v) in model_no_ddp.named_parameters()
         }
@@ -680,15 +656,18 @@ LOADING {eval_ckpt_path}
             self.output_dir,
             "checkpoint_{}.pth".format("best" if is_best else cur_epoch),
         )
-        output_signature = os.path.join(
-            self.output_dir,
-            "checkpoint_{}_sample_output.pth".format("best" if is_best else cur_epoch),
-        )
-        torch.save(self._generate_model_hash(model_no_ddp, self.samples), output_signature)
+        # if self._samples is not None:
+        #     output_signature = os.path.join(
+        #         self.output_dir,
+        #         "checkpoint_{}_sample_output.pth".format("best" if is_best else cur_epoch),
+        #     )
+        #     torch.save(self._generate_model_hash(model_no_ddp, self._samples), output_signature)
 
         logging.info("Saving checkpoint at epoch {} to {}.".format(cur_epoch, save_to))
         torch.save(save_obj, save_to)
         self._validate_outputs(model_no_ddp, save_to)
+        # if not prev_mode:
+        #     model.eval()
 
     def _generate_model_hash(self, model, samples):
         model.eval()
@@ -766,9 +745,6 @@ LOADING {eval_ckpt_path}
         Load the best checkpoint for evaluation.
         """
         checkpoint_path = os.path.join(self.output_dir, "checkpoint_best.pth")
-        return self._load_model(checkpoint_path)
-
-    def _load_model(self, checkpoint_path):
         logging.info("Loading checkpoint from {}.".format(checkpoint_path))
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         model= self.unwrap_dist_model(self.model)
@@ -795,6 +771,9 @@ LOADING {eval_ckpt_path}
             raise RuntimeError("checkpoint url or path is invalid")
 
         m = self.unwrap_dist_model(self.model)
+        # sd=m.state_dict()
+        # prev_mode = m.training
+        # m.train()
         try:
             m.load_state_dict(checkpoint["model"])
         except RuntimeError as e:
@@ -804,14 +783,27 @@ LOADING {eval_ckpt_path}
                 Trying to load the model with strict=False.
                 """
             )
-            m.load_state_dict(checkpoint["model"], strict=False)
+            r = m.load_state_dict(checkpoint["model"], strict=False)
+            params = dict(m.named_parameters())
+            grad_keys = [k for k in r.missing_keys if getattr(params.get(k), 'requires_grad', False)]
+            if any(grad_keys):
+                print(f"MISSING WEIGHTS FOR NON-FROZEN PARAMETERS:")
+                print(grad_keys)
+            if any('lora' in x for x in r.missing_keys):
+                print("LORA KEYS NOT LOADED PROPERLY")
+            # if input('>?'):from IPython import embed;embed()
 
-        self.optimizer.load_state_dict(checkpoint["optimizer"])
-        if self.scaler and "scaler" in checkpoint:
-            self.scaler.load_state_dict(checkpoint["scaler"])
+        if not self.evaluate_only:
+            print("LOADING Optimizer")
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            if self.scaler and "scaler" in checkpoint:
+                print("LOADING Scaler")
+                self.scaler.load_state_dict(checkpoint["scaler"])
 
         self.start_epoch = checkpoint["epoch"] + 1
         logging.info("Resume checkpoint from {}".format(url_or_filename))
+        # if not prev_mode:
+        #     m.eval()
 
     @main_process
     def log_stats(self, stats, split_name):

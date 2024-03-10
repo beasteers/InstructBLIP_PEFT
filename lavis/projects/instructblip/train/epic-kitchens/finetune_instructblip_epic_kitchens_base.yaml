@@ -36,6 +36,7 @@ datasets:
     train_samples_portion: all
     splits:
       all: 
+        image_load_shape: [456, 256]
         qa_prompt:
           - describe_predicates
           - action_before_after

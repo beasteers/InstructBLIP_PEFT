@@ -19,10 +19,13 @@ datasets:
       train: 
         downsample_count: 16
         fake_duplicate_count: 60
+        # h5_file: /scratch/bs3639/EKOS_train.h5
       val: 
         downsample_count: 16
+        # h5_file: /scratch/bs3639/EKOS_train.h5
       test:
         downsample_count: 16
+        # h5_file: /scratch/bs3639/EKOS_train.h5
     build_info:
       annotations:
         train:
@@ -38,15 +41,15 @@ model:
   # qformer_lora_enabled: False
   # qformer_num_classes: 2
   qformer_cls_arch: dense
-  qformer_cls_loss_weight: 1
+  # qformer_cls_loss_weight: 1
   # load_finetuned: true
   # finetuned: output/results/s20bn/s20bn_overfit/20240306150/checkpoint_best.pth
 
 run:
   output_dir: "output/results/s20bn/s20bn_overfit"
-  test_splits: ["test"]
+  # test_splits: ["val"]
   initial_evaluate: false
-  max_epoch: 10
+  max_epoch: 100
   eval_every_n_epochs: 1
   batch_size_train: 64
   init_lr: 5e-4
@@ -54,7 +57,7 @@ run:
   # warmup_steps: 100
   # weight_decay: 0.05
   # num_workers: 0
-  # valid_splits: ['val', 'test']
+  valid_splits: ['val', 'test']
   evaluate: True
   # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
   # resume_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
@@ -66,8 +69,8 @@ run:
   # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth
   # eval_ckpt_path: output/results/s20bn/s20bn_overfit/20240306201/checkpoint_best.pth
   # resume_ckpt_path: output/results/s20bn/s20bn_overfit/20240306212/checkpoint_best.pth
-  resume_ckpt_path: output/results/s20bn/s20bn_overfit/20240306220/checkpoint_best.pth
-  eval_ckpt_path: output/results/s20bn/s20bn_overfit/20240306220/checkpoint_best.pth
+  # resume_ckpt_path: output/results/s20bn/s20bn_overfit/20240306220/checkpoint_best.pth
+  resume_ckpt_path: output/results/s20bn/s20bn_overfit/20240307070/checkpoint_best.pth
 
 tags:
  - overfit

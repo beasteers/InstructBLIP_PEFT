@@ -682,17 +682,17 @@ def lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled: bool = True,
 LORA
     
     """)
-    print("""
+#     print("""
 
-NOOOOOO
+# NOOOOOO
     
-    """)
-    print("""
+#     """)
+#     print("""
 
-NOOOOOOOOOOO. BAD
+# NOOOOOOOOOOO. BAD
     
-    """)
-    return
+#     """)
+#     return
 
     BertSelfAttention.lora_config = LoRAConfig(r=r, alpha=alpha, dropout=dropout)
     BertSelfAttention.qkv = qkv

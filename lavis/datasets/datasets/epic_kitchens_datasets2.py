@@ -38,6 +38,9 @@ class EKVQADataset(BaseDataset):
         return self.dataset[i]
 
 
+# import pyinstrument
+# prof = pyinstrument.Profiler()
+
 class EpicKitchensDataset(VideoFrameDataset):
     def __init__(self, annotation_path, vis_root, json_dir, vis_processor, 
                  downsample_count=None, fake_duplicate_count=None, 
@@ -52,6 +55,7 @@ class EpicKitchensDataset(VideoFrameDataset):
         self.classes = [str(p) for p in predicates]
         super().__init__(annotations, vis_root, vis_processor=vis_processor, classes=predicates, **kw)
         self.prompt_kw['predicate_freq'] = predicate_counts
+        self.prof_count = 0
 
     def load_detections(self, ann):
         # import time
@@ -61,26 +65,42 @@ class EpicKitchensDataset(VideoFrameDataset):
         # finally:
         #     print("t=", time.time()-t0)
 
-
-# 
+#     def __getitem__(self, i):
+#         try:
+#             with prof:
+#                 return super().__getitem__(i)
+#         finally:
+#             self.prof_count += 1
+#             if not self.prof_count % 32:
+#                 prof.print()
+# # 
 
 
 def load_epic_kitchens_dataset(annotation_path, count=None, outer_buffer=60, inner_buffer=2, include_video_ids=None, exclude_video_ids=None, filter_verbs=None, shuffle=True, predicate_freq_balancing=True):
     df = load_annotation_csv(annotation_path)
 
     # use video split list
-    if include_video_ids is not None:
-        if isinstance(include_video_ids, str):
-            include_video_ids = pd.read_csv(include_video_ids).video_id
-        print("including", len(include_video_ids), 'files', len(df))
-        df = df[df.video_id.isin(include_video_ids)]
-        print(len(df))
     if exclude_video_ids is not None:
         if isinstance(exclude_video_ids, str):
-            exclude_video_ids = pd.read_csv(exclude_video_ids).video_id
+            exclude_video_ids = pd.read_csv(exclude_video_ids).video_id.tolist()
+        print(exclude_video_ids)
         print("excluding", len(exclude_video_ids), 'files', len(df))
         df = df[~df.video_id.isin(exclude_video_ids)]
         print(len(df))
+        if not len(df):
+            print(df.video_id.unique())
+            print(exclude_video_ids)
+    elif include_video_ids is not None:
+        if isinstance(include_video_ids, str):
+            include_video_ids = pd.read_csv(include_video_ids).video_id.tolist()
+        print("including", len(include_video_ids), 'files', len(df))
+        print(include_video_ids)
+        df = df[df.video_id.isin(include_video_ids)]
+        if not len(df):
+            print(df.video_id.unique())
+            print(include_video_ids)
+        print(len(df))
+    
     if filter_verbs is not None:
         print("filtering", filter_verbs, 'verbs', len(df))
         df = df[df.verb.isin(filter_verbs)]

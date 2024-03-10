@@ -11,6 +11,7 @@ datasets:
       test: 
         h5_file: /scratch/bs3639/EKOS_val.h5
         include_video_ids: ../epic-kitchens-100-annotations/EPIC_test_video_ids.csv # XXX: fixme
+        downsample_count: 12000
       val:
         h5_file: /scratch/bs3639/EKOS_val.h5
         exclude_video_ids: ../epic-kitchens-100-annotations/EPIC_test_video_ids.csv

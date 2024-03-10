@@ -46,20 +46,24 @@ def get_detections(frame_data, frame, scale=None):
     return detections
 
 
-def get_detections_h5(group, narration_id, frame_ids, frame, scale=None):
-    g = group[narration_id]
-
+def get_detections_h5(g, frame_ids, frame, scale=None):
     detections = []
+    segments = g['segments']
+    names = g['names']
+    class_ids = g['class_ids']
+    track_ids = g['track_ids']
+    confidences = g['confidences']
+    frame_index = g['frame_index']
     for fid in frame_ids:
-        idxs = np.where(g['frame_index'][()] == fid)[0]
+        idxs = np.where(frame_index[()] == fid)[0]
         detections.append(get_detections({
             'annotations': [
                 {
-                    'segments': orjson.loads(g['segments'][i]),
-                    'name': g['names'][i].decode(),
-                    'class_id': int(g['class_ids'][i]),
-                    'track_id': int(g['track_ids'][i]),
-                    'confidence': float(g['confidences'][i]),
+                    'segments': orjson.loads(segments[i]),
+                    'name': names[i].decode(),
+                    'class_id': int(class_ids[i]),
+                    'track_id': int(track_ids[i]),
+                    'confidence': float(confidences[i]),
                 } for i in idxs
             ]
         }, frame, scale))

@@ -118,10 +118,10 @@ LORA DISABLED
         num_params = sum([p.numel() for p in self.Qformer.parameters() if p.requires_grad])
         print(f"Number of trainable parameters in Qformer: {num_params}")
 
-        self._cls_head = None
+        self.cls_head = None
         self.has_classifier = False
         if qformer_num_classes:
-            self._cls_head = CLS_HEAD[qformer_cls_arch](self.Qformer.config.hidden_size, qformer_num_classes)
+            self.cls_head = CLS_HEAD[qformer_cls_arch](self.Qformer.config.hidden_size, qformer_num_classes)
             self.has_classifier = True
         self.qformer_cls_loss_weight = qformer_cls_loss_weight
         
@@ -377,6 +377,7 @@ LORA DISABLED
         length_penalty=1.0,
         num_captions=1,
         temperature=1,
+        return_query_output=False,
     ):
         if "prompt" in samples.keys():
             prompt = samples["prompt"]
@@ -820,11 +821,11 @@ LORA DISABLED
         return cls_output['prediction']
 
     def _get_class_output(self, q_output, query_tokens, targets=None):
-        if self._cls_head is not None:
+        if self.cls_head is not None:
             x = q_output.last_hidden_state
             x = x[:,:query_tokens.size(1),:]
             # x = torch.cat([x, image_embeds], dim=1)
-            return self._cls_head(x, targets=targets)
+            return self.cls_head(x, targets=targets)
 
 
     def _lemmatize(self, answers):
@@ -895,7 +896,7 @@ LORA DISABLED
         alpha = cfg.get("lora_alpha", 16)
         dropout = cfg.get("lora_dropout", 0.05)
         
-        qformer_lora_enabled = False #cfg.get("qformer_lora_enabled", True)
+        qformer_lora_enabled = cfg.get("qformer_lora_enabled", True)
         self_attention_qv_lora = cfg.get("self_attention_qv_lora", False) and qformer_lora_enabled
         self_attention_output_lora = cfg.get("self_attention_output_lora", False) and qformer_lora_enabled
         ffn_lora = cfg.get("ffn_lora", False) and qformer_lora_enabled

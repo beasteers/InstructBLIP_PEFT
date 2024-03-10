@@ -46,6 +46,15 @@ def parse_args():
         "in xxx=yyy format will be merged into config file (deprecate), "
         "change to --cfg-options instead.",
     )
+    parser.add_argument(
+        "--tags",
+        nargs="+",
+        help="add tags to run",
+    )
+    parser.add_argument(
+        "--name",
+        help="wandb name",
+    )
 
     args = parser.parse_args()
     # if 'LOCAL_RANK' not in os.environ:
@@ -87,8 +96,13 @@ def main():
     tags = sorted({
         *(cfg.config.get('tags') or []),
         *(cfg.config.get('datasets') or {}),
+        *(args.tags or []),
     })
-    run = wandb.init(config=OmegaConf.to_container(cfg.config, resolve=True), project='epic-kitchens-grounded', tags=tags)
+    run = wandb.init(
+        config=OmegaConf.to_container(cfg.config, resolve=True), 
+        project='epic-kitchens-grounded', 
+        name=args.name or None, 
+        tags=tags)
 
     init_distributed_mode(cfg.run_cfg)
 

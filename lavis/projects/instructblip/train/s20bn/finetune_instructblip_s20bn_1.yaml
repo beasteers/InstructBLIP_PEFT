@@ -29,3 +29,5 @@ run:
   # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
   # resume_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth  # true-cosmos-320 - s20bn n=1 detections uniQ
   # eval_ckpt_path: output/results/s20bn/s20bn_overfit/20240306212/checkpoint_best.pth
+  # eval_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth
+  resume_ckpt_path: output/results/s20bn/s20bn_1_sm/20240305083/checkpoint_best.pth

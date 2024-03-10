@@ -15,12 +15,20 @@ from PIL import Image
 from lavis.common.predicate_utils.masks import get_detections, draw_detections, get_detections_h5
 from lavis.common.predicate_utils.prompts import get_prompt_function
 
+
+def PIL_load(f, shape=None): 
+    im = Image.open(f) 
+    if shape is not None: 
+        im.draft('RGB',tuple(shape)) #(1008,756)
+    return im
+
+
 class VideoFrameDataset(Dataset):
     def __init__(self, 
                  annotations, vis_root, vis_processor, classes, h5_file=None,
                  qa_prompt=None, include_detections=False, filename_format='{video_id}/frame_{i:010d}.jpg', 
                  n_frames=1, boxes_only=False, included_object_class_ids=None, main_object_only=False,
-                 prompt_kw=None
+                 prompt_kw=None, image_load_shape=None, return_masks=False,
     ):
         super().__init__()
         self.vis_processor = vis_processor
@@ -37,7 +45,28 @@ class VideoFrameDataset(Dataset):
         self.boxes_only = boxes_only
         self.included_object_class_ids = included_object_class_ids
         self.main_object_only = main_object_only
-        self.h5_file = h5py.File(h5_file, 'r', libver='latest') if self.include_detections and h5_file is not None else None
+        self.image_load_shape = image_load_shape
+        self.return_masks = return_masks
+        self.h5_file = None
+        if self.include_detections and h5_file is not None:
+            print("Using", h5_file)
+            self.h5_file = h5py.File(h5_file, 'r', libver='latest')
+            idxs = []
+            for i, a in enumerate(annotations):
+                if a['narration_id'] not in self.h5_file:
+                    print(a['narration_id'], 'missing from h5')
+                    idxs.append(i)
+            self.annotations = [a for i,a in enumerate(annotations) if i not in idxs]
+            print(f"dropping samples as they are missing from h5: {len(idxs)}/{len(self.annotations)}")
+
+
+        # self.im_transform = transforms.ToTensor()
+        # self.im_resize = transforms.Resize(size,
+        #                                    interpolation=InterpolationMode.BILINEAR,
+        #                                    antialias=True)
+        # self.mask_resize = transforms.Resize(size,
+        #                                      interpolation=InterpolationMode.NEAREST,
+        #                                      antialias=True)
 
     def __len__(self):
         return len(self.annotations)
@@ -45,7 +74,15 @@ class VideoFrameDataset(Dataset):
     def load_detections(self, ann):
         raise NotImplementedError()
     
-    def __getitem__(self, i):
+    def __getitem__(self, i, _recursion=0):
+        if _recursion > 50: raise RuntimeError("I tried to find some data, I really did... but idk. too many missing.")
+        try:
+            return self._load_ann(i)
+        except Exception as e:
+            print("WARNING:", e)
+            return self.__getitem__((i + 1)%len(self), _recursion=_recursion+1)
+
+    def _load_ann(self, i):
         ann = self.annotations[i]
 
         # list frames
@@ -59,11 +96,13 @@ class VideoFrameDataset(Dataset):
         if self.include_detections and self.h5_file is None:
             detections = self.load_detections(ann)
 
+        masks = None
         if self.include_detections:
             # load frames
             frame_ids = list(files)
             if self.h5_file is not None:
-                frame_index = self.h5_file[ann['narration_id']]['frame_index'][()]
+                group = self.h5_file[ann['narration_id']]
+                frame_index = group['frame_index'][()]
                 has_detection = np.array([i in frame_index for i in frame_ids])
             else:
                 has_detection = np.array([i in detections for i in frame_ids])
@@ -71,7 +110,7 @@ class VideoFrameDataset(Dataset):
             # frames = [Image.open(files[i]) for i in frame_ids]
             frames, frame_ids = self._load_frames(files, frame_ids, has_detection * 10 + 1)
             if self.h5_file is not None:
-                dets = get_detections_h5(self.h5_file, ann['narration_id'], frame_ids, frames[0])
+                dets = get_detections_h5(group, frame_ids, frames[0])
             else:
                 dets = [get_detections(detections.get(i, {}), x) for x, i in zip(frames, frame_ids)]
 
@@ -87,13 +126,17 @@ class VideoFrameDataset(Dataset):
                     for ds in dets
                 ]
             object_index = list({l for d in dets for l in d.data['labels']})
-            det_frames = [
-                draw_detections(x, d, object_index, boxes_only=self.boxes_only) 
-                for x, i, d in zip(frames, frame_ids, dets)
-            ]
-            # interleave frames
-            frames = [x for xs in zip(frames, det_frames) for x in xs]
-            # frames = det_frames
+
+            if self.return_masks:
+                masks = detections.mask
+            else:
+                det_frames = [
+                    draw_detections(x, d, object_index, boxes_only=self.boxes_only) 
+                    for x, i, d in zip(frames, frame_ids, dets)
+                ]
+                # interleave frames
+                frames = [x for xs in zip(frames, det_frames) for x in xs]
+                # frames = det_frames
 
             # load question answer
             prompt, target = self.get_prompt(ann, object_index, **self.prompt_kw)
@@ -155,6 +198,7 @@ class VideoFrameDataset(Dataset):
 
             "targets": class_targets,
             # "class_labels": class_labels,
+            **({'masks': masks} if masks is not None else {})
         }
 
     
@@ -187,7 +231,7 @@ class VideoFrameDataset(Dataset):
         for fid in samples:
             for _ in range(3):
                 try:
-                    frames.append(Image.open(fs[fid]))
+                    frames.append(PIL_load(fs[fid], self.image_load_shape))
                     out_frame_ids.append(fid)
                     break
                 except OSError:

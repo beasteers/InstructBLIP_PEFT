@@ -78,63 +78,64 @@ class EpicKitchensTask(BaseTask):
             if cls_pred.shape[1] != samples['targets'].shape[1]:
                 self.class_mismatch = True
                 cls_pred = None
-
-        for i in range(len(answer_pred)):
-            print(samples["narration_id"][i])
-            r = {
-                "question": samples["text_input"][i],
-                "answer_pred": answer_pred[i], 
-                "answer_true": samples["text_output"][i],
-                "image_id": samples["image_id"][i].item(), 
-                "narration_id": samples["narration_id"][i], 
-                "noun": samples["noun"][i], 
-            }
-            if cls_pred is not None:
-                r.update({
-                    "cls_pred": cls_pred[i].cpu().numpy().tolist(),
-                    "cls_true": samples['targets'][i].cpu().numpy().tolist(),
-                    # "cls_labels": samples['class_labels'][i].cpu().numpy().tolist(),
-                })
-            # yt=samples['targets'][i].cpu().numpy()
-            # yp=cls_pred[i].cpu().numpy()
-            # print(np.array(self.classes)[yt!=-1])
-            # print(yt[yt!=-1])
-            # print((yp[yt!=-1] >= 0.5).astype(int))
-            # print(np.round(yp[yt!=-1], 3))
-            # if input('>?'):from IPython import embed;embed()
-            results.append(r)
-            if samples['sample_id'][i].item() in self.sample_index:
-                print("Sample:", samples['sample_id'][i], samples["narration_id"][i], samples["narration"][i])
-                print("in:", samples['text_input'][i])
-                print("pred:", answer_pred[i])
-                print("true:", samples["text_output"][i])
+        with open(f'{registry.get_path("result_dir")}/result_stream.txt', 'a') as fh:
+            for i in range(len(answer_pred)):
+                # print(samples["narration_id"][i])
+                r = {
+                    "question": samples["text_input"][i],
+                    "answer_pred": answer_pred[i], 
+                    "answer_true": samples["text_output"][i],
+                    "image_id": samples["image_id"][i].item(), 
+                    "narration_id": samples["narration_id"][i], 
+                    "noun": samples["noun"][i], 
+                }
                 if cls_pred is not None:
-                    cs = np.array(self.classes)
-                    yt=samples['targets'][i].cpu().numpy()
-                    yp=cls_pred[i].cpu().numpy()
-                    print(cs[yt!=-1])
-                    print(yt[yt!=-1])
-                    print(np.round(yp[yt!=-1], 3))
-                self.result_table.add_data(
-                    samples['sample_id'][i],
-                    wandb.Video(norm_video(samples["image"][i]).cpu().numpy(), fps=3) 
-                    if samples["image"].ndim == 5 else
-                    wandb.Image(samples["image"][i].cpu()),
-                    samples["text_input"][i],  # question
-                    answer_pred[i],  # Predicted answer
-                    samples["text_output"][i],  # True answer
-                    '\n'.join(f'{c}[{t:.0f}]: {p:.3f}' for c, t, p in zip(cs[yt!=-1], yt[yt!=-1], yp[yt!=-1]))
-                    if cls_pred is not None else "",  # cls prediction
-                    samples["narration_id"][i],  # Narration ID
-                    samples["narration"][i]  # Narration text
-                )
+                    r.update({
+                        "cls_pred": cls_pred[i].cpu().numpy().tolist(),
+                        "cls_true": samples['targets'][i].cpu().numpy().tolist(),
+                        # "cls_labels": samples['class_labels'][i].cpu().numpy().tolist(),
+                    })
+                # yt=samples['targets'][i].cpu().numpy()
+                # yp=cls_pred[i].cpu().numpy()
+                # print(np.array(self.classes)[yt!=-1])
+                # print(yt[yt!=-1])
+                # print((yp[yt!=-1] >= 0.5).astype(int))
+                # print(np.round(yp[yt!=-1], 3))
+                # if input('>?'):from IPython import embed;embed()
+                results.append(r)
+                fh.write(f'{json.dumps(r)}\n')
+                if samples['sample_id'][i].item() in self.sample_index:
+                    print("Sample:", samples['sample_id'][i], samples["narration_id"][i], samples["narration"][i])
+                    print("in:", samples['text_input'][i])
+                    print("pred:", answer_pred[i])
+                    print("true:", samples["text_output"][i])
+                    if cls_pred is not None:
+                        cs = np.array(self.classes)
+                        yt=samples['targets'][i].cpu().numpy()
+                        yp=cls_pred[i].cpu().numpy()
+                        print(cs[yt!=-1])
+                        print(yt[yt!=-1])
+                        print(np.round(yp[yt!=-1], 3))
+                    self.result_table.add_data(
+                        samples['sample_id'][i],
+                        wandb.Video(norm_video(samples["image"][i]).cpu().numpy(), fps=3) 
+                        if samples["image"].ndim == 5 else
+                        wandb.Image(samples["image"][i].cpu()),
+                        samples["text_input"][i],  # question
+                        answer_pred[i],  # Predicted answer
+                        samples["text_output"][i],  # True answer
+                        '\n'.join(f'{c}[{t:.0f}]: {p:.3f}' for c, t, p in zip(cs[yt!=-1], yt[yt!=-1], yp[yt!=-1]))
+                        if cls_pred is not None else "",  # cls prediction
+                        samples["narration_id"][i],  # Narration ID
+                        samples["narration"][i]  # Narration text
+                    )
         
         return results
 
     def before_evaluation(self, model, dataset, **kwargs):
         print("before eval",kwargs)
         super().before_evaluation(model, dataset, **kwargs)
-        self.sample_index = np.random.choice(len(dataset), min(90, len(dataset)), replace=False)
+        self.sample_index = np.random.choice(len(dataset), min(60, len(dataset)), replace=False)
         print("eval samples:", self.sample_index, len(dataset))
         self.result_table = wandb.Table(columns=["index", "image", "question", "answer_pred", "answer_true", "cls", "narration_id", "narration"])
 
@@ -143,14 +144,15 @@ class EpicKitchensTask(BaseTask):
         print("write table", len(self.result_table.data))
         wandb.log({"predictions": self.result_table})
 
-        
-
         result_file = self.save_result(
             val_result,
             result_dir=registry.get_path("result_dir"),
             filename=f"{split_name}_epic_kitchens_result_{epoch}",
             remove_duplicate="", 
         )
+        try:
+            os.rename(f'{registry.get_path("result_dir")}/result_stream.txt', f'{registry.get_path("result_dir")}/{split_name}_result_stream_{epoch}.txt')
+        except Exception as e: print(e)
         # metrics = None
         # if split_name == 'val':
         metrics = self._report_metrics(result_file=result_file, split=split_name)

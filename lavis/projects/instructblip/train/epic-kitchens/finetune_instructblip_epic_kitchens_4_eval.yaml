@@ -2,26 +2,17 @@
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
-_BASE_: finetune_instructblip_epic_kitchens_base.yaml
-datasets:
-  epic_kitchens:
-    splits:
-      all:
-        n_frames: 3
-        include_detections: True
-        boxes_only: True
-        main_object_only: True
-        included_object_class_ids:
-         - 11
-         - 300
-         - 301
-         - 303
-         - 304
+_BASE_: finetune_instructblip_epic_kitchens_4.yaml
 run:
-  output_dir: "output/results/epic_kitchens/epic_kitchens_4"
+  output_dir: "output/results/epic_kitchens/epic_kitchens_eval"
   batch_size_train: 64
   batch_size_eval: 64
   num_beams: 4
 
   evaluate: True
-  eval_ckpt_path: output/results/epic_kitchens/epic_kitchens_4/20240306051/checkpoint_best.pth
+  # eval_ckpt_path: output/results/epic_kitchens/epic_kitchens_4/20240306051/checkpoint_best.pth
+  # resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_4/20240307072/checkpoint_best.pth
+
+  # resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_2/20240307082/checkpoint_best.pth
+  resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_4/20240307073/checkpoint_best.pth
+  

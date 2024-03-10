@@ -6,3 +6,7 @@ _BASE_: finetune_instructblip_epic_kitchens_2.yaml
 
 model:
   qformer_num_classes: null
+
+
+run:
+  resume_ckpt_path: output/results/epic_kitchens/epic_kitchens_2/20240306051/checkpoint_best.pth
